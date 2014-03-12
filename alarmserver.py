@@ -17,9 +17,16 @@ import hashlib
 import time
 import getopt
 
-from envisalinkdefs import evl_ResponseTypes
-from envisalinkdefs import evl_Defaults
-from envisalinkdefs import evl_ArmModes
+
+# from envisalinkdefs import evl_ResponseTypes
+# from envisalinkdefs import evl_Defaults
+# from envisalinkdefs import evl_ArmModes
+# from envisalinkdefs import evl_Partition_Status_Codes
+# from envisalinkdefs import evl_Virtual_Keypad_How_To_Beep
+# from envisalinkdefs import evl_CID_Qualifiers
+# from envisalinkdefs import evl_CID_Events
+from envisalinkdefs import *
+
 
 LOGTOFILE = False
 
@@ -179,6 +186,35 @@ class HTTPChannel(asynchat.async_chat):
         self.push_with_producer(push_FileProducer(sys.path[0] + os.sep + 'ext' + os.sep + file))
 
 
+import ctypes
+c_uint16 = ctypes.c_uint16
+
+class IconLED_Bitfield( ctypes.LittleEndianStructure ):
+    _fields_ = [
+                ("alarm",     c_uint16, 1 ),
+                ("alarm_in_memory", c_uint16, 1 ),
+                ("armed_away",    c_uint16, 1 ),
+                ("ac_present",       c_uint16, 1 ),
+                ("bypass",       c_uint16, 1 ), 
+                ("chime",       c_uint16, 1 ), 
+                ("not_used1",       c_uint16, 1 ), 
+                ("armed_zero_entery_delay",       c_uint16, 1 ), 
+                ("alarm_fire_zone",       c_uint16, 1 ), 
+                ("system_trouble",       c_uint16, 1 ), 
+                ("not_used2",       c_uint16, 1 ), 
+                ("not_used3",       c_uint16, 1 ), 
+                ("ready",       c_uint16, 1 ), 
+                ("fire",       c_uint16, 1 ), 
+                ("low_battery",       c_uint16, 1 ), 
+                ("armed_stay",       c_uint16, 1 )
+               ]
+
+class IconLED_Flags( ctypes.Union ):
+    _fields_ = [
+                ("b",      IconLED_Bitfield ),
+                ("asShort", c_uint16    )
+               ]
+    _anonymous_ = ("b")
 
 class EnvisalinkClient(asynchat.async_chat):
     def __init__(self, config):
@@ -190,6 +226,9 @@ class EnvisalinkClient(asynchat.async_chat):
 
         # Are we logged in?
         self._loggedin = False
+
+        # Set our terminator to \n
+        self.set_terminator("\r\n")
 
         # Set config
         self._config = config
@@ -234,19 +273,22 @@ class EnvisalinkClient(asynchat.async_chat):
         alarmserver_logger("Error, disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
         self.do_connect(True)
 
-    def send_command(self, code, data):
-        to_send = code+data
+    def send_data(self,data):
+        alarmserver_logger('TX > '+data)
+        self.push(data)
 
-        alarmserver_logger('TX > '+to_send)
-        self.push(to_send)
+    def send_envisalink_command(self, code, data):
+        to_send = '^'+code+','+data+'$'
+        self.send_data(to_send)
 
     def handle_line(self, input):
         if input != '':
             for client in CONNECTEDCLIENTS:
                 CONNECTEDCLIENTS[client].send_command(input, False)
 
+            alarmserver_logger('----------------------------------------')
             alarmserver_logger('RX < ' + input)
-            if input[0] in ("%","^":
+            if input[0] in ("%","^"):
                 #keep first sentinel char to tell difference between tpi and Envisalink command responses.  Drop the trailing $ sentinel.
                 inputList = input[0:-1].split(',')
                 code = inputList[0]
@@ -256,12 +298,10 @@ class EnvisalinkClient(asynchat.async_chat):
                 code = input
                 data = ''
 
-            alarmserver_logger('Parsed input: code='+code+' data='+data)
             #code=int(input[:3])
             #parameters=input[3:][:-2]
             #event = getMessageType(int(code))
             #message = self.format_event(event, parameters)
-            #alarmserver_logger('RX < ' +str(code)+' - '+message)
             
             
             try:
@@ -270,16 +310,18 @@ class EnvisalinkClient(asynchat.async_chat):
             except KeyError:
                 #call general event handler
                 #self.handle_event(code, parameters, event, message)
-                alarmserver_logger('No handler defined, skipping...')
+                self.handle_general(code,data)
                 return
 
             try:
-                func = getattr(self, handler)
+                handlerFunc = getattr(self, handler)
             except AttributeError:
                 raise CodeError("Handler function doesn't exist")
 
             
-            func(code, data)
+            handlerFunc(data)
+            alarmserver_logger('----------------------------------------')
+ 
 
     def format_event(self, event, parameters):
         if 'type' in event:
@@ -319,20 +361,75 @@ class EnvisalinkClient(asynchat.async_chat):
         return event['name'].format(str(parameters))
 
     #envisalink event handlers, some events are unhandled.
-    def handle_login(self, code, data):
-        self.send_command(self._config.ENVISALINKPASS,'')
+    def handle_login(self, data):
+        self.send_data(self._config.ENVISALINKPASS)
 
-    def handle_login_success(self,code,data):
+    def handle_login_success(self,data):
         self._loggedin = True
         alarmserver_logger('Password accepted, session created')
 
-    def handle_login_failure(self,code,data):
+    def handle_login_failure(self, data):
         alarmserver_logger('Password is incorrect. Server is closing socket connection.')
 
-    def handle_login_timeout(self,code,data):
+    def handle_login_timeout(self,data):
         alarmserver_logger('Envisalink timed out waiting for password, whoops that should never happen. Server is closing socket connection')
 
+    def handle_keypad_update(self,data):
+        dataList = data.split(',')
+        partition = dataList[0]
+        flags = IconLED_Flags()
+        flags.asShort = int(dataList[1],16)
+        userOrZone = dataList[2]
+        beep = evl_Virtual_Keypad_How_To_Beep[dataList[3]]
+        alpha = dataList[4]
 
+
+        alarmserver_logger('update is for partition '+partition)
+
+        alarmserver_logger('keypad update bit alarm is {0}'.format(bool(flags.alarm)))
+        alarmserver_logger('keypad update bit alarm_in_memory is {0}'.format(bool(flags.alarm_in_memory)))
+        alarmserver_logger('keypad update bit armed_away is {0}'.format(bool(flags.armed_away)))
+        alarmserver_logger('keypad update bit ac_present is {0}'.format(bool(flags.ac_present)))
+        alarmserver_logger('keypad update bit bypass is {0}'.format(bool(flags.bypass)))
+        alarmserver_logger('keypad update bit chime is {0}'.format(bool(flags.chime)))
+        alarmserver_logger('keypad update bit armed_zero_entery_delay is {0}'.format(bool(flags.armed_zero_entery_delay)))
+        alarmserver_logger('keypad update bit alarm_fire_zone is {0}'.format(bool(flags.alarm_fire_zone)))
+        alarmserver_logger('keypad update bit system_trouble is {0}'.format(bool(flags.system_trouble)))
+        alarmserver_logger('keypad update bit ready is {0}'.format(bool(flags.ready)))
+        alarmserver_logger('keypad update bit fire is {0}'.format(bool(flags.fire)))
+        alarmserver_logger('keypad update bit armed_stay is {0}'.format(bool(flags.armed_stay)))
+
+        alarmserver_logger('user or zone or numeric data: ' + userOrZone)
+
+        alarmserver_logger('beep value: '+beep)
+
+        alarmserver_logger('===>'+alpha)
+
+    def handle_zone_state_change(self,data):
+        #Honeywell Panels or Envisalink currently does not seem to generate these events
+        alarmserver_logger('TODO')
+
+    def handle_partition_state_change(self,data):
+        for currentPartition in range(0,8):
+            partitionState = data[currentPartition*2:(currentPartition*2)+2]
+            alarmserver_logger('Parition ' + str(currentPartition + 1) + ' is in state ' + evl_Partition_Status_Codes[partitionState])
+
+    def handle_realtime_cid_event(self,data):
+        qualifier = evl_CID_Qualifiers[int(data[0])]
+        cidEvent = evl_CID_Events[int(data[1:4])]
+        partition = data[4:6]
+        zoneOrUser = data[6:9]
+
+
+        alarmserver_logger('Event Type is '+qualifier)
+        alarmserver_logger('CID Type is '+cidEvent['type'])
+        alarmserver_logger('CID Description is '+cidEvent['label'])
+        alarmserver_logger('Partition is '+partition)
+        alarmserver_logger(cidEvent['type'] + ' value is ' + zoneOrUser)
+
+
+    def handle_general(self, code, data):
+        alarmserver_logger('No handler defined for '+code+', skipping...')
 
     def handle_event(self, code, parameters, event, message):
         if 'type' in event:
@@ -592,9 +689,8 @@ if __name__=="__main__":
 
     alarmserver_logger('Alarm Server Starting')
     alarmserver_logger('Currently Supporting Envisalink 2DS/3 only')
-    alarmserver_logger('Tested on a DSC-1616 + EVL-3')
-    alarmserver_logger('and on a DSC-1832 + EVL-2DS')
-    alarmserver_logger('and on a DSC-1864 v4.6 + EVL-3')
+    alarmserver_logger('Tested on a Honeywell Vista 15p + EVL-3')
+
 
     server = AlarmServer(config)
     proxy = EnvisalinkProxy(config, server)
