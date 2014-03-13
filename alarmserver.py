@@ -18,13 +18,6 @@ import time
 import getopt
 
 
-# from envisalinkdefs import evl_ResponseTypes
-# from envisalinkdefs import evl_Defaults
-# from envisalinkdefs import evl_ArmModes
-# from envisalinkdefs import evl_Partition_Status_Codes
-# from envisalinkdefs import evl_Virtual_Keypad_How_To_Beep
-# from envisalinkdefs import evl_CID_Qualifiers
-# from envisalinkdefs import evl_CID_Events
 from envisalinkdefs import *
 
 
@@ -33,6 +26,7 @@ LOGTOFILE = False
 class CodeError(Exception): pass
 
 ALARMSTATE={'version' : 0.1}
+KEYPADSTATE = [{}] * 8      #list of dictionaries, one for each possible partition
 MAXPARTITIONS=16
 MAXZONES=128
 MAXALARMUSERS=47
@@ -198,7 +192,7 @@ class IconLED_Bitfield( ctypes.LittleEndianStructure ):
                 ("bypass",       c_uint16, 1 ), 
                 ("chime",       c_uint16, 1 ), 
                 ("not_used1",       c_uint16, 1 ), 
-                ("armed_zero_entery_delay",       c_uint16, 1 ), 
+                ("armed_zero_entry_delay",       c_uint16, 1 ), 
                 ("alarm_fire_zone",       c_uint16, 1 ), 
                 ("system_trouble",       c_uint16, 1 ), 
                 ("not_used2",       c_uint16, 1 ), 
@@ -306,7 +300,6 @@ class EnvisalinkClient(asynchat.async_chat):
             
             try:
                 handler = "handle_%s" % evl_ResponseTypes[code]['handler']
-                alarmserver_logger('handler is ' + handler)
             except KeyError:
                 #call general event handler
                 #self.handle_event(code, parameters, event, message)
@@ -360,6 +353,8 @@ class EnvisalinkClient(asynchat.async_chat):
 
         return event['name'].format(str(parameters))
 
+
+
     #envisalink event handlers, some events are unhandled.
     def handle_login(self, data):
         self.send_data(self._config.ENVISALINKPASS)
@@ -376,43 +371,63 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def handle_keypad_update(self,data):
         dataList = data.split(',')
-        partition = dataList[0]
+        partitionNumber = int(dataList[0])
         flags = IconLED_Flags()
         flags.asShort = int(dataList[1],16)
         userOrZone = dataList[2]
-        beep = evl_Virtual_Keypad_How_To_Beep[dataList[3]]
+        beep = evl_Virtual_Keypad_How_To_Beep.get(dataList[3],'unknown')
         alpha = dataList[4]
 
+ 
+        self.init_alarmstate(partitionNumber)
+        ALARMSTATE['partition'][partitionNumber]['status'].update( {'alarm' : bool(flags.alarm), 'alarm_in_memory' : bool(flags.alarm_in_memory), 'armed_way' : bool(flags.armed_away),
+                                                        'ac_present' : bool(flags.ac_present), 'armed_bypass' : bool(flags.bypass), 'chime' : bool(flags.chime),
+                                                        'armed_zero_entry_delay' : bool(flags.armed_zero_entry_delay), 'alarm_fire_zone' : bool(flags.alarm_fire_zone),
+                                                        'trouble' : bool(flags.system_trouble), 'ready' : bool(flags.ready), 'fire' : bool(flags.fire),
+                                                        'armed_away' : bool(flags.armed_stay),
+                                                        'alpha' : alpha,  
+                                                        'beep' : beep,
+                                                        })
+        
 
-        alarmserver_logger('update is for partition '+partition)
+        # 'partition' : { 'exit_delay' : False, 'entry_delay' : False, 'armed' : False,  },
 
+
+        alarmserver_logger('update is for partition '+str(partitionNumber))
         alarmserver_logger('keypad update bit alarm is {0}'.format(bool(flags.alarm)))
         alarmserver_logger('keypad update bit alarm_in_memory is {0}'.format(bool(flags.alarm_in_memory)))
         alarmserver_logger('keypad update bit armed_away is {0}'.format(bool(flags.armed_away)))
         alarmserver_logger('keypad update bit ac_present is {0}'.format(bool(flags.ac_present)))
         alarmserver_logger('keypad update bit bypass is {0}'.format(bool(flags.bypass)))
         alarmserver_logger('keypad update bit chime is {0}'.format(bool(flags.chime)))
-        alarmserver_logger('keypad update bit armed_zero_entery_delay is {0}'.format(bool(flags.armed_zero_entery_delay)))
+        alarmserver_logger('keypad update bit armed_zero_entry_delay is {0}'.format(bool(flags.armed_zero_entry_delay)))
         alarmserver_logger('keypad update bit alarm_fire_zone is {0}'.format(bool(flags.alarm_fire_zone)))
         alarmserver_logger('keypad update bit system_trouble is {0}'.format(bool(flags.system_trouble)))
         alarmserver_logger('keypad update bit ready is {0}'.format(bool(flags.ready)))
         alarmserver_logger('keypad update bit fire is {0}'.format(bool(flags.fire)))
         alarmserver_logger('keypad update bit armed_stay is {0}'.format(bool(flags.armed_stay)))
-
         alarmserver_logger('user or zone or numeric data: ' + userOrZone)
-
         alarmserver_logger('beep value: '+beep)
-
         alarmserver_logger('===>'+alpha)
 
     def handle_zone_state_change(self,data):
         #Honeywell Panels or Envisalink currently does not seem to generate these events
-        alarmserver_logger('TODO')
+        alarmserver_logger('zone state change handler not implemented yet')
 
     def handle_partition_state_change(self,data):
-        for currentPartition in range(0,8):
-            partitionState = data[currentPartition*2:(currentPartition*2)+2]
-            alarmserver_logger('Parition ' + str(currentPartition + 1) + ' is in state ' + evl_Partition_Status_Codes[partitionState])
+        for currentIndex in range(0,8):
+            partitionState = data[currentIndex*2:(currentIndex*2)+2]
+            if partitionState != '00':
+                partitionNumber = currentIndex + 1
+                self.init_alarmstate(partitionNumber)
+                #panel seems to send 07 for both entry and exit delay, TODO see if previous state was armed, then it is entry_delay.
+                previouslyArmed = ALARMSTATE['partition'][partitionNumber]['status'].get('armed',False)
+                ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay' : bool(partitionState == '07' and not previouslyArmed), 
+                                                                           'entry_delay' : bool (partitionState == '07' and previouslyArmed),
+                                                                           'armed' : bool (partitionState == '04' or partitionState == '05' or partitionState == '06')} )
+
+                alarmserver_logger('Parition ' + str(partitionNumber) + ' is in state ' + evl_Partition_Status_Codes[partitionState])
+                alarmserver_logger(json.dumps(ALARMSTATE))
 
     def handle_realtime_cid_event(self,data):
         qualifier = evl_CID_Qualifiers[int(data[0])]
@@ -473,6 +488,15 @@ class EnvisalinkClient(asynchat.async_chat):
     def handle_partition(self, code, parameters, event, message):
         self.handle_event(code, parameters[0], event, message)
 
+    def init_alarmstate(self,partitionNumber):
+        if not 'partition' in ALARMSTATE: ALARMSTATE['partition']={'lastevents' : []}
+        if partitionNumber in self._config.PARTITIONNAMES:
+            if not partitionNumber in ALARMSTATE['partition']: ALARMSTATE['partition'][partitionNumber] = {'name' : self._config.PARTITIONNAMES[partitionNumber]}
+        else:
+            if not partitionNumber in ALARMSTATE['partition']: ALARMSTATE['partition'][partitionNumber] = {}
+        if not 'lastevents' in ALARMSTATE['partition'][partitionNumber]: ALARMSTATE['partition'][partitionNumber]['lastevents'] = []
+        if not 'status' in ALARMSTATE['partition'][partitionNumber]: ALARMSTATE['partition'][partitionNumber]['status'] = {}
+
 class push_FileProducer:
     # a producer which reads data from a file object
 
@@ -512,8 +536,8 @@ class AlarmServer(asyncore.dispatcher):
 
         try:
             HTTPChannel(self, ssl.wrap_socket(conn, server_side=True, certfile=config.CERTFILE, keyfile=config.KEYFILE, ssl_version=ssl.PROTOCOL_TLSv1), addr)
-        except ssl.SSLError:
-            alarmserver_logger('Failed https connection, attempted with http')
+        except ssl.SSLError as e:
+            alarmserver_logger("SSL error({0}): {1}".format(e.errno, e.strerror))
             return
 
     def handle_request(self, channel, method, request, header):
@@ -522,6 +546,10 @@ class AlarmServer(asyncore.dispatcher):
 
         query = urlparse.urlparse(request)
         query_array = urlparse.parse_qs(query.query, True)
+        if 'alarmcode' in query_array:
+            alarmcode = str(query_array['alarmcode'][0])
+        else:
+            alarmcode = str(self._config.ALARMCODE)
 
         if query.path == '/':
             channel.pushfile('index.html');
@@ -529,28 +557,25 @@ class AlarmServer(asyncore.dispatcher):
             channel.pushok(json.dumps(ALARMSTATE))
         elif query.path == '/api/alarm/arm':
             channel.pushok(json.dumps({'response' : 'Request to arm received'}))
-            self._envisalinkclient.send_command('030', '1')
+            self._envisalinkclient.send_data(alarmcode+'2')
         elif query.path == '/api/alarm/stayarm':
             channel.pushok(json.dumps({'response' : 'Request to arm in stay received'}))
-            self._envisalinkclient.send_command('031', '1')
+            self._envisalinkclient.send_data(alarmcode+'3')
         elif query.path == '/api/alarm/armwithcode':
             channel.pushok(json.dumps({'response' : 'Request to arm with code received'}))
-            self._envisalinkclient.send_command('033', '1' + str(query_array['alarmcode'][0]))
+            self._envisalinkclient.send_data(str(query_array['alarmcode'][0])+'2')
         elif query.path == '/api/pgm':
             channel.pushok(json.dumps({'response' : 'Request to trigger PGM'}))
             #self._envisalinkclient.send_command('020', '1' + str(query_array['pgmnum'][0]))
-            self._envisalinkclient.send_command('071', '1' + "*7" + str(query_array['pgmnum'][0]))
-            time.sleep(1)
-            self._envisalinkclient.send_command('071', '1' + str(query_array['alarmcode'][0]))
+            #self._envisalinkclient.send_command('071', '1' + "*7" + str(query_array['pgmnum'][0]))
+            #time.sleep(1)
+            #self._envisalinkclient.send_command('071', '1' + str(query_array['alarmcode'][0]))
         elif query.path == '/api/alarm/disarm':
             channel.pushok(json.dumps({'response' : 'Request to disarm received'}))
-            if 'alarmcode' in query_array:
-                self._envisalinkclient.send_command('040', '1' + str(query_array['alarmcode'][0]))
-            else:
-                self._envisalinkclient.send_command('040', '1' + str(self._config.ALARMCODE))
+            self._envisalinkclient.send_data(alarmcode+'1')
         elif query.path == '/api/refresh':
             channel.pushok(json.dumps({'response' : 'Request to refresh data received'}))
-            self._envisalinkclient.send_command('001', '')
+            #self._envisalinkclient.send_command('001', '')
         elif query.path == '/api/config/eventtimeago':
             channel.pushok(json.dumps({'eventtimeago' : str(self._config.EVENTTIMEAGO)}))
         elif query.path == '/img/glyphicons-halflings.png':
@@ -573,7 +598,7 @@ class AlarmServer(asyncore.dispatcher):
                     channel.push("\r\n")
             else:
                 if (config.LOGURLREQUESTS):
-                                                                        alarmserver_logger("Invalid file requested")
+                    alarmserver_logger("Invalid file requested")
 
                 channel.pushstatus(404, "Not found")
                 channel.push("Content-type: text/html\r\n")
