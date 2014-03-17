@@ -1,8 +1,8 @@
 #!/usr/bin/python
 ## Alarm Server
 ## Supporting Envisalink 2DS/3
-## Written by donnyk+envisalink@gmail.com
-## Lightly improved by leaberry@gmail.com
+## Original version for DSC Written by donnyk+envisalink@gmail.com, lightly improved by leaberry@gmail.com
+## Honeywell version adapted by matt.weinecke@gmail.com
 ##
 ## This code is under the terms of the GPL v3 license.
 
@@ -26,11 +26,9 @@ LOGTOFILE = False
 class CodeError(Exception): pass
 
 ALARMSTATE={'version' : 0.1}
-KEYPADSTATE = [{}] * 8      #list of dictionaries, one for each possible partition
 MAXPARTITIONS=16
 MAXZONES=128
 MAXALARMUSERS=47
-CONNECTEDCLIENTS={}
 
 
 def getMessageType(code):
@@ -179,37 +177,6 @@ class HTTPChannel(asynchat.async_chat):
         self.push("\r\n")
         self.push_with_producer(push_FileProducer(sys.path[0] + os.sep + 'ext' + os.sep + file))
 
-
-import ctypes
-c_uint16 = ctypes.c_uint16
-
-class IconLED_Bitfield( ctypes.LittleEndianStructure ):
-    _fields_ = [
-                ("alarm",     c_uint16, 1 ),
-                ("alarm_in_memory", c_uint16, 1 ),
-                ("armed_away",    c_uint16, 1 ),
-                ("ac_present",       c_uint16, 1 ),
-                ("bypass",       c_uint16, 1 ), 
-                ("chime",       c_uint16, 1 ), 
-                ("not_used1",       c_uint16, 1 ), 
-                ("armed_zero_entry_delay",       c_uint16, 1 ), 
-                ("alarm_fire_zone",       c_uint16, 1 ), 
-                ("system_trouble",       c_uint16, 1 ), 
-                ("not_used2",       c_uint16, 1 ), 
-                ("not_used3",       c_uint16, 1 ), 
-                ("ready",       c_uint16, 1 ), 
-                ("fire",       c_uint16, 1 ), 
-                ("low_battery",       c_uint16, 1 ), 
-                ("armed_stay",       c_uint16, 1 )
-               ]
-
-class IconLED_Flags( ctypes.Union ):
-    _fields_ = [
-                ("b",      IconLED_Bitfield ),
-                ("asShort", c_uint16    )
-               ]
-    _anonymous_ = ("b")
-
 class EnvisalinkClient(asynchat.async_chat):
     def __init__(self, config):
         # Call parent class's __init__ method
@@ -220,6 +187,8 @@ class EnvisalinkClient(asynchat.async_chat):
 
         # Are we logged in?
         self._loggedin = False
+
+        self._has_partition_state_changed = False
 
         # Set our terminator to \n
         self.set_terminator("\r\n")
@@ -261,12 +230,6 @@ class EnvisalinkClient(asynchat.async_chat):
         alarmserver_logger("Disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
         self.do_connect(True)
 
-    def handle_eerror(self):
-        self._loggedin = False
-        self.close()
-        alarmserver_logger("Error, disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
-        self.do_connect(True)
-
     def send_data(self,data):
         alarmserver_logger('TX > '+data)
         self.push(data)
@@ -277,9 +240,7 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def handle_line(self, input):
         if input != '':
-            for client in CONNECTEDCLIENTS:
-                CONNECTEDCLIENTS[client].send_command(input, False)
-
+ 
             alarmserver_logger('----------------------------------------')
             alarmserver_logger('RX < ' + input)
             if input[0] in ("%","^"):
@@ -291,19 +252,12 @@ class EnvisalinkClient(asynchat.async_chat):
                 #assume it is login info
                 code = input
                 data = ''
-
-            #code=int(input[:3])
-            #parameters=input[3:][:-2]
-            #event = getMessageType(int(code))
-            #message = self.format_event(event, parameters)
             
             
             try:
                 handler = "handle_%s" % evl_ResponseTypes[code]['handler']
             except KeyError:
-                #call general event handler
-                #self.handle_event(code, parameters, event, message)
-                self.handle_general(code,data)
+                alarmserver_logger('No handler defined for '+code+', skipping...')
                 return
 
             try:
@@ -315,45 +269,6 @@ class EnvisalinkClient(asynchat.async_chat):
             handlerFunc(data)
             alarmserver_logger('----------------------------------------')
  
-
-    def format_event(self, event, parameters):
-        if 'type' in event:
-            if event['type'] in ('partition', 'zone'):
-                if event['type'] == 'partition':
-                    # If parameters includes extra digits then this next line would fail
-                    # without looking at just the first digit which is the partition number
-                    if int(parameters[0]) in self._config.PARTITIONNAMES:
-                        if self._config.PARTITIONNAMES[int(parameters[0])]!=False:
-                            # After partition number can be either a usercode
-                            # or for event 652 a type of arm mode (single digit)
-                            # Usercode is always 4 digits padded with zeros
-                            if len(str(parameters)) == 5:
-                                # We have a usercode
-                                try:
-                                    usercode = int(parameters[1:5])
-                                except:
-                                    usercode = 0
-                                if int(usercode) in self._config.ALARMUSERNAMES:
-                                    if self._config.ALARMUSERNAMES[int(usercode)]!=False:
-                                        alarmusername = self._config.ALARMUSERNAMES[int(usercode)]
-                                    else:
-                                        # Didn't find a username, use the code instead
-                                        alarmusername = usercode
-                                    return event['name'].format(str(self._config.PARTITIONNAMES[int(parameters[0])]), str(alarmusername))
-                            elif len(parameters) == 2:
-                                # We have an arm mode instead, get it's friendly name
-                                armmode = evl_ArmModes[int(parameters[1])]
-                                return event['name'].format(str(self._config.PARTITIONNAMES[int(parameters[0])]), str(armmode))
-                            else:
-                                return event['name'].format(str(self._config.PARTITIONNAMES[int(parameters)]))
-                elif event['type'] == 'zone':
-                    if int(parameters) in self._config.ZONENAMES:
-                        if self._config.ZONENAMES[int(parameters)]!=False:
-                            return event['name'].format(str(self._config.ZONENAMES[int(parameters)]))
-
-        return event['name'].format(str(parameters))
-
-
 
     #envisalink event handlers, some events are unhandled.
     def handle_login(self, data):
@@ -379,48 +294,35 @@ class EnvisalinkClient(asynchat.async_chat):
         alpha = dataList[4]
 
  
-        self.init_alarmstate(partitionNumber)
-        ALARMSTATE['partition'][partitionNumber]['status'].update( {'alarm' : bool(flags.alarm), 'alarm_in_memory' : bool(flags.alarm_in_memory), 'armed_way' : bool(flags.armed_away),
+        self.ensure_init_alarmstate(partitionNumber)
+        ALARMSTATE['partition'][partitionNumber]['status'].update( {'alarm' : bool(flags.alarm), 'alarm_in_memory' : bool(flags.alarm_in_memory), 'armed_away' : bool(flags.armed_away),
                                                         'ac_present' : bool(flags.ac_present), 'armed_bypass' : bool(flags.bypass), 'chime' : bool(flags.chime),
                                                         'armed_zero_entry_delay' : bool(flags.armed_zero_entry_delay), 'alarm_fire_zone' : bool(flags.alarm_fire_zone),
                                                         'trouble' : bool(flags.system_trouble), 'ready' : bool(flags.ready), 'fire' : bool(flags.fire),
-                                                        'armed_away' : bool(flags.armed_stay),
+                                                        'armed_stay' : bool(flags.armed_stay),
                                                         'alpha' : alpha,  
                                                         'beep' : beep,
                                                         })
         
+        #if we have never yet received a partition state changed event,  we need to compute the armed state ourselves.   Don't want to always do it here because we can't also
+        #figure out if we are in entry/exit delay from here
+        if not self._has_partition_state_changed:
+            ALARMSTATE['partition'][partitionNumber]['status'].update( {'armed' : bool(flags.armed_away or flags.bypass or flags.armed_zero_entry_delay or flags.armed_stay)})
 
-        # 'partition' : { 'exit_delay' : False, 'entry_delay' : False, 'armed' : False,  },
+        alarmserver_logger(json.dumps(ALARMSTATE))
 
-
-        alarmserver_logger('update is for partition '+str(partitionNumber))
-        alarmserver_logger('keypad update bit alarm is {0}'.format(bool(flags.alarm)))
-        alarmserver_logger('keypad update bit alarm_in_memory is {0}'.format(bool(flags.alarm_in_memory)))
-        alarmserver_logger('keypad update bit armed_away is {0}'.format(bool(flags.armed_away)))
-        alarmserver_logger('keypad update bit ac_present is {0}'.format(bool(flags.ac_present)))
-        alarmserver_logger('keypad update bit bypass is {0}'.format(bool(flags.bypass)))
-        alarmserver_logger('keypad update bit chime is {0}'.format(bool(flags.chime)))
-        alarmserver_logger('keypad update bit armed_zero_entry_delay is {0}'.format(bool(flags.armed_zero_entry_delay)))
-        alarmserver_logger('keypad update bit alarm_fire_zone is {0}'.format(bool(flags.alarm_fire_zone)))
-        alarmserver_logger('keypad update bit system_trouble is {0}'.format(bool(flags.system_trouble)))
-        alarmserver_logger('keypad update bit ready is {0}'.format(bool(flags.ready)))
-        alarmserver_logger('keypad update bit fire is {0}'.format(bool(flags.fire)))
-        alarmserver_logger('keypad update bit armed_stay is {0}'.format(bool(flags.armed_stay)))
-        alarmserver_logger('user or zone or numeric data: ' + userOrZone)
-        alarmserver_logger('beep value: '+beep)
-        alarmserver_logger('===>'+alpha)
 
     def handle_zone_state_change(self,data):
         #Honeywell Panels or Envisalink currently does not seem to generate these events
         alarmserver_logger('zone state change handler not implemented yet')
 
     def handle_partition_state_change(self,data):
+        self._has_partition_state_changed = True
         for currentIndex in range(0,8):
             partitionState = data[currentIndex*2:(currentIndex*2)+2]
             if partitionState != '00':
                 partitionNumber = currentIndex + 1
-                self.init_alarmstate(partitionNumber)
-                #panel seems to send 07 for both entry and exit delay, TODO see if previous state was armed, then it is entry_delay.
+                self.ensure_init_alarmstate(partitionNumber)
                 previouslyArmed = ALARMSTATE['partition'][partitionNumber]['status'].get('armed',False)
                 ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay' : bool(partitionState == '07' and not previouslyArmed), 
                                                                            'entry_delay' : bool (partitionState == '07' and previouslyArmed),
@@ -443,52 +345,7 @@ class EnvisalinkClient(asynchat.async_chat):
         alarmserver_logger(cidEvent['type'] + ' value is ' + zoneOrUser)
 
 
-    def handle_general(self, code, data):
-        alarmserver_logger('No handler defined for '+code+', skipping...')
-
-    def handle_event(self, code, parameters, event, message):
-        if 'type' in event:
-            if not event['type'] in ALARMSTATE: ALARMSTATE[event['type']]={'lastevents' : []}
-
-            if event['type'] in ('partition', 'zone'):
-                if event['type'] == 'zone':
-                    if int(parameters) in self._config.ZONENAMES:
-                        if not int(parameters) in ALARMSTATE[event['type']]: ALARMSTATE[event['type']][int(parameters)] = {'name' : self._config.ZONENAMES[int(parameters)]}
-                    else:
-                        if not int(parameters) in ALARMSTATE[event['type']]: ALARMSTATE[event['type']][int(parameters)] = {}
-                elif event['type'] == 'partition':
-                    if int(parameters) in self._config.PARTITIONNAMES:
-                        if not int(parameters) in ALARMSTATE[event['type']]: ALARMSTATE[event['type']][int(parameters)] = {'name' : self._config.PARTITIONNAMES[int(parameters)]}
-                    else:
-                        if not int(parameters) in ALARMSTATE[event['type']]: ALARMSTATE[event['type']][int(parameters)] = {}
-            else:
-                if not int(parameters) in ALARMSTATE[event['type']]: ALARMSTATE[event['type']][int(parameters)] = {}
-
-            if not 'lastevents' in ALARMSTATE[event['type']][int(parameters)]: ALARMSTATE[event['type']][int(parameters)]['lastevents'] = []
-            if not 'status' in ALARMSTATE[event['type']][int(parameters)]:
-                if not 'type' in event:
-                    ALARMSTATE[event['type']][int(parameters)]['status'] = {}
-                else:
-                    ALARMSTATE[event['type']][int(parameters)]['status'] = evl_Defaults[event['type']]
-
-            if 'status' in event:
-                ALARMSTATE[event['type']][int(parameters)]['status']=dict_merge(ALARMSTATE[event['type']][int(parameters)]['status'], event['status'])
-
-            if len(ALARMSTATE[event['type']][int(parameters)]['lastevents']) > self._config.MAXEVENTS:
-                ALARMSTATE[event['type']][int(parameters)]['lastevents'].pop(0)
-            ALARMSTATE[event['type']][int(parameters)]['lastevents'].append({'datetime' : str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")), 'message' : message})
-
-            if len(ALARMSTATE[event['type']]['lastevents']) > self._config.MAXALLEVENTS:
-                ALARMSTATE[event['type']]['lastevents'].pop(0)
-            ALARMSTATE[event['type']]['lastevents'].append({'datetime' : str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")), 'message' : message})
-
-    def handle_zone(self, code, parameters, event, message):
-        self.handle_event(code, parameters[1:], event, message)
-
-    def handle_partition(self, code, parameters, event, message):
-        self.handle_event(code, parameters[0], event, message)
-
-    def init_alarmstate(self,partitionNumber):
+    def ensure_init_alarmstate(self,partitionNumber):
         if not 'partition' in ALARMSTATE: ALARMSTATE['partition']={'lastevents' : []}
         if partitionNumber in self._config.PARTITIONNAMES:
             if not partitionNumber in ALARMSTATE['partition']: ALARMSTATE['partition'][partitionNumber] = {'name' : self._config.PARTITIONNAMES[partitionNumber]}
@@ -556,14 +413,14 @@ class AlarmServer(asyncore.dispatcher):
         elif query.path == '/api':
             channel.pushok(json.dumps(ALARMSTATE))
         elif query.path == '/api/alarm/arm':
-            channel.pushok(json.dumps({'response' : 'Request to arm received'}))
             self._envisalinkclient.send_data(alarmcode+'2')
+            channel.pushok(json.dumps({'response' : 'Arm command sent to Envisalink.'}))
         elif query.path == '/api/alarm/stayarm':
-            channel.pushok(json.dumps({'response' : 'Request to arm in stay received'}))
             self._envisalinkclient.send_data(alarmcode+'3')
+            channel.pushok(json.dumps({'response' : 'Arm Home command sent to Envisalink.'}))
         elif query.path == '/api/alarm/armwithcode':
-            channel.pushok(json.dumps({'response' : 'Request to arm with code received'}))
             self._envisalinkclient.send_data(str(query_array['alarmcode'][0])+'2')
+            channel.pushok(json.dumps({'response' : 'Arm With Code command sent to Envisalink.'}))
         elif query.path == '/api/pgm':
             channel.pushok(json.dumps({'response' : 'Request to trigger PGM'}))
             #self._envisalinkclient.send_command('020', '1' + str(query_array['pgmnum'][0]))
@@ -571,8 +428,8 @@ class AlarmServer(asyncore.dispatcher):
             #time.sleep(1)
             #self._envisalinkclient.send_command('071', '1' + str(query_array['alarmcode'][0]))
         elif query.path == '/api/alarm/disarm':
-            channel.pushok(json.dumps({'response' : 'Request to disarm received'}))
             self._envisalinkclient.send_data(alarmcode+'1')
+            channel.pushok(json.dumps({'response' : 'Disarm command sent to Envisalink.'}))
         elif query.path == '/api/refresh':
             channel.pushok(json.dumps({'response' : 'Request to refresh data received'}))
             #self._envisalinkclient.send_command('001', '')
@@ -604,86 +461,6 @@ class AlarmServer(asyncore.dispatcher):
                 channel.push("Content-type: text/html\r\n")
                 channel.push("\r\n")
 
-class ProxyChannel(asynchat.async_chat):
-    def __init__(self, server, proxypass, sock, addr):
-        asynchat.async_chat.__init__(self, sock)
-        self.server = server
-        self.set_terminator("\r\n")
-        self._buffer = []
-        self._server = server
-        self._clientMD5 = hashlib.md5(str(addr)).hexdigest()
-        self._straddr = str(addr)
-        self._proxypass = proxypass
-        self._authenticated = False
-
-        self.send_command('5053')
-
-    def collect_incoming_data(self, data):
-        # Append incoming data to the buffer
-        self._buffer.append(data)
-
-    def found_terminator(self):
-        line = "".join(self._buffer)
-        self._buffer = []
-        self.handle_line(line)
-
-    def handle_line(self, line):
-        alarmserver_logger('PROXY REQ < '+line)
-        if self._authenticated == True:
-            self._server._envisalinkclient.send_command(line, '', False)
-        else:
-            self.send_command('500005')
-            expectedstring = '005' + self._proxypass + get_checksum('005', self._proxypass)
-            if line == ('005' + self._proxypass + get_checksum('005', self._proxypass)):
-                alarmserver_logger('Proxy User Authenticated')
-                CONNECTEDCLIENTS[self._straddr]=self
-                self._authenticated = True
-                self.send_command('5051')
-            else:
-                alarmserver_logger('Proxy User Authentication failed')
-                self.send_command('5050')
-                self.close()
-
-    def send_command(self, data, checksum = True):
-        if checksum == True:
-            to_send = data+get_checksum(data, '')+'\r\n'
-        else:
-            to_send = data+'\r\n'
-
-        self.push(to_send)
-
-    def handle_close(self):
-        alarmserver_logger('Proxy connection from %s closed' % self._straddr)
-        if self._straddr in CONNECTEDCLIENTS: del CONNECTEDCLIENTS[self._straddr]
-        self.close()
-
-    def handle_error(self):
-        alarmserver_logger('Proxy connection from %s errored' % self._straddr)
-        if self._straddr in CONNECTEDCLIENTS: del CONNECTEDCLIENTS[self._straddr]
-        self.close()
-
-class EnvisalinkProxy(asyncore.dispatcher):
-    def __init__(self, config, server):
-        self._config = config
-        if self._config.ENABLEPROXY == False:
-            return
-
-        asyncore.dispatcher.__init__(self)
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.set_reuse_addr()
-        alarmserver_logger('Envisalink Proxy Started')
-
-        self.bind(("", self._config.ENVISALINKPROXYPORT))
-        self.listen(5)
-
-    def handle_accept(self):
-        pair = self.accept()
-        if pair is None:
-            pass
-        else:
-            sock, addr = pair
-            alarmserver_logger('Incoming proxy connection from %s' % repr(addr))
-            handler = ProxyChannel(server, self._config.ENVISALINKPROXYPASS, sock, addr)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' -c <configfile>'
@@ -718,8 +495,7 @@ if __name__=="__main__":
 
 
     server = AlarmServer(config)
-    proxy = EnvisalinkProxy(config, server)
-
+ 
     try:
         while True:
             asyncore.loop(timeout=2, count=1)

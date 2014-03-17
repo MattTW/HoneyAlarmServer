@@ -1,4 +1,12 @@
-This is still beta software.
+This project uses the [Ademco TPI provided by Eyez-On](http://forum.eyez-on.com/FORUM/viewtopic.php?f=6&t=301) to allow it to be used with Honeywell/Ademco security panels.
+
+This is a heavily modified version of the parent project.   The parent project only implements the DSC Envisalink TPI and does not support Honeywell/Ademco panels.  The interfaces provided by the Envisalink vendor are fundamenatally different, this project's modifications may never be pulled back into the parent - that remains to be seen. 
+
+This is still beta software.  So far it has only been tested with an Envisalink 3 and Honeywell Vista 15p panel.    The server has logic for the 0,1,2, and 3 commands from the Envisalink giving status updates about the panel.   0,2 state changes are tracked by the Alarm Server and can be retrieved via the Web API.   1,3 log debug messages only at this time.  FF TPI command and application commands to the Envisalink are not yet implemented.
+
+The Web Interface app is not yet working.   However the underlying api, arm, disarm, and armstay http service calls are working, but are providing different data then the sample web client expects.
+
+-------------
 
 The ssl certificates that are provided are intended for demo purposes only.  
 Please use openssl to generate your own. A quick HOWTO is below.
