@@ -205,6 +205,8 @@ class EnvisalinkClient(asynchat.async_chat):
         # Create the socket and connect to the server
         if reconnect == True:
             alarmserver_logger('Connection failed, retrying in '+str(self._retrydelay)+ ' seconds')
+            alarmserver_logger('resetting input buffer')
+            self._buffer = []
             for i in range(0, self._retrydelay):
                 time.sleep(1)
 
@@ -286,6 +288,11 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def handle_keypad_update(self,data):
         dataList = data.split(',')
+        #make sure data is in format we expect, current TPI seems to send bad data every so ofen
+        if dataList.size !=5 or "%" in data:
+            alarmserver_logger("Data format invalid from Envisalink, ignoring...")
+            return
+        
         partitionNumber = int(dataList[0])
         flags = IconLED_Flags()
         flags.asShort = int(dataList[1],16)
