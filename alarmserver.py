@@ -289,10 +289,10 @@ class EnvisalinkClient(asynchat.async_chat):
     def handle_keypad_update(self,data):
         dataList = data.split(',')
         #make sure data is in format we expect, current TPI seems to send bad data every so ofen
-        if dataList.size !=5 or "%" in data:
+        if len(dataList) !=5 or "%" in data:
             alarmserver_logger("Data format invalid from Envisalink, ignoring...")
             return
-        
+
         partitionNumber = int(dataList[0])
         flags = IconLED_Flags()
         flags.asShort = int(dataList[1],16)
