@@ -48,6 +48,17 @@ evl_ResponseTypes = {
     '^02' : {'type' : 'envisalink', 'name': 'Dump Zone Timers', 'description' : 'This command contains the raw zone timers used inside the Envisalink. The dump is a 256 character packed HEX string representing 64 UINT16 (little endian) zone timers. Zone timers count down from 0xFFFF (zone is open) to 0x0000 (zone is closed too long ago to remember). Each ''tick'' of the zone time is actually 5 seconds so a zone timer of 0xFFFE means ''5 seconds ago''. Remember, the zone timers are LITTLE ENDIAN so the above example would be transmitted as FEFF.'},
 }
 
+class PartitionStatusCode(object):
+    NOT_USED = '00'
+    READY = '01'
+    READY_BYPASS = '02'
+    NOTREADY = '03'
+    ARMED_STAY = '04'
+    ARMED_AWAY = '05'
+    ARMED_MAX = '06'
+    EXIT_ENTRY_DELAY = '07'
+    IN_ALARM = '08'
+    ALARM_IN_MEMORY = '09'
 
 evl_Partition_Status_Codes = {
     '00' : 'Partition is not used or doesn''t exist',
@@ -59,7 +70,7 @@ evl_Partition_Status_Codes = {
     '06' : 'Armed Maximum (Zero Entry Delay)',
     '07' : 'Exit Delay',
     '08' : 'Partition is in Alarm',
-    '09' : 'Alarm Has Occurred (Alarm in Memory'
+    '09' : 'Alarm Has Occurred (Alarm in Memory)'
 }
 
 evl_Virtual_Keypad_How_To_Beep = {

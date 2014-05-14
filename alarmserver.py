@@ -17,8 +17,8 @@ import hashlib
 import time
 import getopt
 
-
 from envisalinkdefs import *
+from plugins.basePlugin import BasePlugin
 
 
 LOGTOFILE = False
@@ -40,20 +40,48 @@ def alarmserver_logger(message, type = 0, level = 0):
         outfile.flush()
     else:
         print (str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))+' '+message)
-    
 
-#currently supports pushover notifications, more to be added
-#including email, text, etc.
-#to be fixed!
-def send_notification(config, message):
-    if config.PUSHOVER_ENABLE == True:
-        conn = httplib.HTTPSConnection("api.pushover.net:443")
-        conn.request("POST", "/1/messages.json",
-            urllib.urlencode({
-            "token": "qo0nwMNdX56KJl0Avd4NHE2onO4Xff",
-            "user": config.PUSHOVER_USERTOKEN,
-            "message": str(message),
-            }), { "Content-type": "application/x-www-form-urlencoded" })
+#simple plugin system
+def find_subclasses(path, cls):
+    """
+    Find all subclass of cls in py files located below path
+    (does look in sub directories)
+    """
+
+    subclasses=[]
+
+    def look_for_subclass(modulename):
+        alarmserver_logger("searching %s" % (modulename))
+        module=__import__(modulename)
+
+        #walk the dictionaries to get to the last one
+        d=module.__dict__
+        for m in modulename.split('.')[1:]:
+            d=d[m].__dict__
+
+        #look through this dictionary for things that are subclass of Job but are not Job itself
+        for key, entry in d.items():
+            if key == cls.__name__:
+                continue
+
+            try:
+                if issubclass(entry, cls):
+                    alarmserver_logger("Found subclass: "+key)
+                    subclasses.append(entry)
+            except TypeError:
+                #this happens when a non-type is passed in to issubclass. We
+                #don't care as it can't be a subclass of Job if it isn't a type
+                continue
+
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            if name.endswith(".py") and not name.startswith("__"):
+                path = os.path.join(root[2:], name)     #remove ./ from beginning of root
+                modulename = path.rsplit('.', 1)[0].replace('/', '.')
+                look_for_subclass(modulename)
+
+    return subclasses
+
 
 class AlarmServerConfig():
     def __init__(self, configfile):
@@ -201,6 +229,15 @@ class EnvisalinkClient(asynchat.async_chat):
 
         self.do_connect()
 
+
+        # find plugins and load/config them
+        self.plugins = []
+
+        pluginClasses = find_subclasses("./plugins/", BasePlugin)
+        for plugin in pluginClasses:
+            plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
+            self.plugins.append(plugin(plugincfg))
+
     def do_connect(self, reconnect = False):
         # Create the socket and connect to the server
         if reconnect == True:
@@ -327,16 +364,26 @@ class EnvisalinkClient(asynchat.async_chat):
         self._has_partition_state_changed = True
         for currentIndex in range(0,8):
             partitionState = data[currentIndex*2:(currentIndex*2)+2]
-            if partitionState != '00':
+            if partitionState != PartitionStatusCode.NOT_USED:
                 partitionNumber = currentIndex + 1
                 self.ensure_init_alarmstate(partitionNumber)
                 previouslyArmed = ALARMSTATE['partition'][partitionNumber]['status'].get('armed',False)
-                ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay' : bool(partitionState == '07' and not previouslyArmed), 
-                                                                           'entry_delay' : bool (partitionState == '07' and previouslyArmed),
-                                                                           'armed' : bool (partitionState == '04' or partitionState == '05' or partitionState == '06')} )
+                armed = partitionState == PartitionStatusCode.ARMED_STAY or partitionState == PartitionStatusCode.ARMED_AWAY or partitionState == PartitionStatusCode.ARMED_MAX
+                ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay' : bool(partitionState == PartitionStatusCode.EXIT_ENTRY_DELAY and not previouslyArmed),
+                                                                           'entry_delay' : bool (partitionState == PartitionStatusCode.EXIT_ENTRY_DELAY and previouslyArmed),
+                                                                           'armed' : armed } )
 
                 alarmserver_logger('Parition ' + str(partitionNumber) + ' is in state ' + evl_Partition_Status_Codes[partitionState])
                 alarmserver_logger(json.dumps(ALARMSTATE))
+                #notify plugins of state changes
+                if armed and not previouslyArmed:
+                    for plugin in self.plugins:
+                        plugin.armedAway()
+
+                if not armed and previouslyArmed:
+                    for plugin in self.plugins:
+                        plugin.disarmed()
+
 
     def handle_realtime_cid_event(self,data):
         qualifier = evl_CID_Qualifiers[int(data[0])]
@@ -360,6 +407,7 @@ class EnvisalinkClient(asynchat.async_chat):
             if not partitionNumber in ALARMSTATE['partition']: ALARMSTATE['partition'][partitionNumber] = {}
         if not 'lastevents' in ALARMSTATE['partition'][partitionNumber]: ALARMSTATE['partition'][partitionNumber]['lastevents'] = []
         if not 'status' in ALARMSTATE['partition'][partitionNumber]: ALARMSTATE['partition'][partitionNumber]['status'] = {}
+
 
 class push_FileProducer:
     # a producer which reads data from a file object
