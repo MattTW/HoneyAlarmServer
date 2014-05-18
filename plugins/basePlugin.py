@@ -16,6 +16,12 @@ class BasePlugin(object):
     def disarmed(self):
       return
 
+    def alarmTriggered(self):
+      return
+
+    def alarmCleared(self):
+      return
+
     #utility methods for config
     def defaulting(self, section, variable, default, quiet = False):
         if quiet == False:
