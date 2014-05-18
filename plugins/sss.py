@@ -19,23 +19,24 @@ class sssPlugin(BasePlugin):
         self._session = requests.Session();
         self.signonSS()
 
-    def armedAway(self):
-      """implement when you want on alarm system being armed away"""
-      return
+    def armedAway(self,user):
+      self.cameraEnable(True)
 
-    def armedHome(self):
-      return
+    def armedHome(self,user):
+      self.cameraEnable(False)
 
-    def armedInstant(self):
-      return
+    def disarmedHome(self,user):
+      self.cameraEnable(False)
 
-    def disarmed(self):
-      return
+    def disarmedAway(self,user):
+      #only disable cameras when disarmed with non-guest code
+      if not self.isGuest(user):
+          self.cameraEnable(False)
 
-    def alarmTriggered(self):
+    def alarmTriggered(self,user):
       self.cameraRecord(True)
 
-    def alarmCleared(self):
+    def alarmCleared(self,user):
       self.cameraRecord(False)
 
     def signonSS(self):

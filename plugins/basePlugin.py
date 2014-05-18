@@ -3,26 +3,28 @@ import ConfigParser
 class BasePlugin(object):
 
     #methods that ancestors should implement if wanting to act on condition
-    def armedAway(self):
+    def armedAway(self,user):
       """implement when you want on alarm system being armed away"""
       return
 
-    def armedHome(self):
+    def armedHome(self,user):
       return
 
-    def armedInstant(self):
+    def disarmedAway(self,user):
       return
 
-    def disarmed(self):
+    def disarmedHome(self,user):
       return
 
-    def alarmTriggered(self):
+    def alarmTriggered(self,user):
       return
 
-    def alarmCleared(self):
+    def alarmCleared(self,user):
       return
 
     #utility methods for config
+    def isGuest(self,user): return isinstance(user, basestring) and user.lower().startswith('guest')
+
     def defaulting(self, section, variable, default, quiet = False):
         if quiet == False:
             print('Config option '+ str(variable) + ' not set in ['+str(section)+'] defaulting to: \''+str(default)+'\'')

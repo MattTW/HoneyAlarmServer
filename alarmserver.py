@@ -101,8 +101,6 @@ class AlarmServerConfig():
         self.ENABLEPROXY = self.read_config_var('envisalink', 'enableproxy', True, 'bool')
         self.ENVISALINKPROXYPORT = self.read_config_var('envisalink', 'proxyport', self.ENVISALINKPORT, 'int')
         self.ENVISALINKPROXYPASS = self.read_config_var('envisalink', 'proxypass', self.ENVISALINKPASS, 'str')
-        self.PUSHOVER_ENABLE = self.read_config_var('pushover', 'enable', False, 'bool')
-        self.PUSHOVER_USERTOKEN = self.read_config_var('pushover', 'enable', False, 'bool')
         self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
         self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
         self.LOGFILE = self.read_config_var('alarmserver', 'logfile', '', 'str')
@@ -123,8 +121,6 @@ class AlarmServerConfig():
         self.ALARMUSERNAMES={}
         for i in range(1, MAXALARMUSERS+1):
             self.ALARMUSERNAMES[i]=self.read_config_var('alarmserver', 'user'+str(i), False, 'str', True)
-
-        if self.PUSHOVER_USERTOKEN == False and self.PUSHOVER_ENABLE == True: self.PUSHOVER_ENABLE = False
 
     def defaulting(self, section, variable, default, quiet = False):
         if quiet == False:
@@ -370,53 +366,52 @@ class EnvisalinkClient(asynchat.async_chat):
                 #TODO can we use dict.setdefault or defaultdict here instead?
                 self.ensure_init_alarmstate(partitionNumber)
                 previouslyArmed = ALARMSTATE['partition'][partitionNumber]['status'].get('armed',False)
-                armed = partitionState['name'] == 'ARMED_STAY' or 'ARMED_AWAY' or 'ARMED_MAX'
+                armed = partitionState['name'] in ('ARMED_STAY','ARMED_AWAY','ARMED_MAX')
                 ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay' : bool(partitionState['name'] == 'EXIT_ENTRY_DELAY' and not previouslyArmed),
                                                                            'entry_delay' : bool (partitionState['name'] == 'EXIT_ENTRY_DELAY' and previouslyArmed),
                                                                            'armed' : armed } )
 
                 alarmserver_logger('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
                 alarmserver_logger(json.dumps(ALARMSTATE))
-                #notify plugins of state changes
-                self.notify_plugins(partitionState)
 
-
-    def notify_plugins(self,partitionState):
-      # if armed and not previouslyArmed:
-      #     for plugin in self.plugins:
-      #         plugin.armedAway()
-      #
-      # if not armed and previouslyArmed:
-      #     for plugin in self.plugins:
-      #         plugin.disarmed()
-
-
-      try:
-          handler = partitionState['pluginhandler']
-      except KeyError:
-          alarmserver_logger('No handler defined for '+partitionState['name']+', skipping...')
-          return
-
-      for plugin in self.plugins:
-          try:
-              handlerFunc = getattr(plugin, handler)
-          except AttributeError:
-              raise CodeError("Handler function %s doesn't exist in plugin %s" % (handler,plugin))
-
-          handlerFunc()
 
     def handle_realtime_cid_event(self,data):
-        qualifier = evl_CID_Qualifiers[int(data[0])]
-        cidEvent = evl_CID_Events[int(data[1:4])]
+        qualifierInt = int(data[0])
+        qualifier = evl_CID_Qualifiers[qualifierInt]
+        cidEventInt = int(data[1:4])
+        cidEvent = evl_CID_Events[cidEventInt]
         partition = data[4:6]
         zoneOrUser = data[6:9]
-
 
         alarmserver_logger('Event Type is '+qualifier)
         alarmserver_logger('CID Type is '+cidEvent['type'])
         alarmserver_logger('CID Description is '+cidEvent['label'])
         alarmserver_logger('Partition is '+partition)
         alarmserver_logger(cidEvent['type'] + ' value is ' + zoneOrUser)
+
+        #notify plugins about if it is an event about arming or alarm
+        currentUser = self._config.ALARMUSERNAMES[int(zoneOrUser)]
+        if not currentUser: currentUser = 'Unknown!'
+        alarmserver_logger('Mapped User is ' + currentUser)
+        if cidEventInt == 401 and qualifierInt == 3:   #armed away or instant/max
+            for plugin in self.plugins:
+                plugin.armedAway(currentUser)
+        if cidEventInt == 441 and qualifierInt == 3:   #armed home
+            for plugin in self.plugins:
+                plugin.armedHome(currentUser)
+        if cidEventInt == 401 and qualifierInt == 1:  #disarmed away
+            for plugin in self.plugins:
+                plugin.disarmedAway(currentUser)
+        if cidEventInt == 441 and qualifierInt == 1:  #disarmed away
+            for plugin in self.plugins:
+                plugin.disarmedHome(currentUser)
+        #TODO get the true events to look for on alarm triggered/clear
+        if cidEventInt in (123,124) and qualifierInt == 1:   #alarm triggered
+            for plugin in self.plugins:
+                plugin.alarmTriggered(currentUser)
+        if cidEventInt in (123,124) and qualifierInt == 3:  #alarm cleared
+            for plugin in self.plugins:
+                plugin.alarmCleared(currentUser)
 
 
     def ensure_init_alarmstate(self,partitionNumber):

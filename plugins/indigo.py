@@ -15,28 +15,29 @@ class IndigoPlugin(BasePlugin):
         self._PASSWORD = self.read_config_var('indigo', 'password', 'pass', 'str')
 
         self._urlbase = 'http://%s:%i/variables/' % (self._SERVER,self._PORT)
-        self._auth = HTTPDigestAuth(self._USERNAME,self._PASSWORD)
+        self._session = requests.Session();
 
     #Update Indigo variables based on alarm event
-    def armedAway(self):
-        r = requests.put(self._urlbase + 'alarmArmedAway', data={'value': str(True)}, auth=self._auth)
+    def armedAway(self,user):
+        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+        r = self._session.put(self._urlbase + 'alarmArmedAway', data={'value': str(True)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
-    def armedHome(self):
-        r = requests.put(self._urlbase + 'alarmArmedHome', data={'value': str(True)}, auth=self._auth)
+    def armedHome(self,user):
+        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+        r = self._session.put(self._urlbase + 'alarmArmedHome', data={'value': str(True)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
+    def disarmedAway(self,user):
+        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+        r = self._session.put(self._urlbase + 'alarmArmedAway', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
-    def armedInstant(self):
-        r = requests.put(self._urlbase + 'alarmArmedAway', data={'value': str(True)}, auth=self._auth)
+    def disarmedHome(self,user):
+        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+        r = self._session.put(self._urlbase + 'alarmArmedHome', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
+    def alarmTriggered(self,user):
+        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+        r = self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(True)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
-    def disarmed(self):
-        r = requests.put(self._urlbase + 'alarmArmedAway', data={'value': str(False)}, auth=self._auth)
-        r = requests.put(self._urlbase + 'alarmArmedHome', data={'value': str(False)}, auth=self._auth)
-
-
-    def alarmTriggered(self):
-        r = requests.put(self._urlbase + 'alarmTriggered', data={'value': str(True)}, auth=self._auth)
-
-
-    def alarmCleared(self):
-        r = requests.put(self._urlbase + 'alarmTriggered', data={'value': str(False)}, auth=self._auth)
+    def alarmCleared(self,user):
+        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+        r = self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
