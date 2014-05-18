@@ -11,17 +11,17 @@ class IconLED_Bitfield( ctypes.LittleEndianStructure ):
                 ("alarm_in_memory", c_uint16, 1 ),
                 ("armed_away",    c_uint16, 1 ),
                 ("ac_present",       c_uint16, 1 ),
-                ("bypass",       c_uint16, 1 ), 
-                ("chime",       c_uint16, 1 ), 
-                ("not_used1",       c_uint16, 1 ), 
-                ("armed_zero_entry_delay",       c_uint16, 1 ), 
-                ("alarm_fire_zone",       c_uint16, 1 ), 
-                ("system_trouble",       c_uint16, 1 ), 
-                ("not_used2",       c_uint16, 1 ), 
-                ("not_used3",       c_uint16, 1 ), 
-                ("ready",       c_uint16, 1 ), 
-                ("fire",       c_uint16, 1 ), 
-                ("low_battery",       c_uint16, 1 ), 
+                ("bypass",       c_uint16, 1 ),
+                ("chime",       c_uint16, 1 ),
+                ("not_used1",       c_uint16, 1 ),
+                ("armed_zero_entry_delay",       c_uint16, 1 ),
+                ("alarm_fire_zone",       c_uint16, 1 ),
+                ("system_trouble",       c_uint16, 1 ),
+                ("not_used2",       c_uint16, 1 ),
+                ("not_used3",       c_uint16, 1 ),
+                ("ready",       c_uint16, 1 ),
+                ("fire",       c_uint16, 1 ),
+                ("low_battery",       c_uint16, 1 ),
                 ("armed_stay",       c_uint16, 1 )
                ]
 
@@ -48,29 +48,17 @@ evl_ResponseTypes = {
     '^02' : {'type' : 'envisalink', 'name': 'Dump Zone Timers', 'description' : 'This command contains the raw zone timers used inside the Envisalink. The dump is a 256 character packed HEX string representing 64 UINT16 (little endian) zone timers. Zone timers count down from 0xFFFF (zone is open) to 0x0000 (zone is closed too long ago to remember). Each ''tick'' of the zone time is actually 5 seconds so a zone timer of 0xFFFE means ''5 seconds ago''. Remember, the zone timers are LITTLE ENDIAN so the above example would be transmitted as FEFF.'},
 }
 
-class PartitionStatusCode(object):
-    NOT_USED = '00'
-    READY = '01'
-    READY_BYPASS = '02'
-    NOTREADY = '03'
-    ARMED_STAY = '04'
-    ARMED_AWAY = '05'
-    ARMED_MAX = '06'
-    EXIT_ENTRY_DELAY = '07'
-    IN_ALARM = '08'
-    ALARM_IN_MEMORY = '09'
-
 evl_Partition_Status_Codes = {
-    '00' : 'Partition is not used or doesn''t exist',
-    '01' : 'Ready',
-    '02' : 'Ready to Arm (Zones are Bypasses)',
-    '03' : 'Not Ready',
-    '04' : 'Armed in Stay Mode',
-    '05' : 'Armed in Away Mode',
-    '06' : 'Armed Maximum (Zero Entry Delay)',
-    '07' : 'Exit Delay',
-    '08' : 'Partition is in Alarm',
-    '09' : 'Alarm Has Occurred (Alarm in Memory)'
+    '00' : {'name' : 'NOT_USED', 'description' : 'Partition is not used or doesn''t exist'},
+    '01' : {'name' : 'READY', 'description' : 'Ready', 'pluginhandler' : 'disarmed'},
+    '02' : {'name' : 'READY_BYPASS', 'description' : 'Ready to Arm (Zones are Bypasses)', 'pluginhandler' : 'disarmed'},
+    '03' : {'name' : 'NOT_READY', 'description' : 'Not Ready', 'pluginhandler' : 'disarmed'},
+    '04' : {'name' : 'ARMED_STAY', 'description' : 'Armed in Stay Mode', 'pluginhandler' : 'armedHome'},
+    '05' : {'name' : 'ARMED_AWAY', 'description' : 'Armed in Away Mode', 'pluginhandler' : 'armedAway'},
+    '06' : {'name' : 'ARMED_MAX', 'description' : 'Armed in Away Mode', 'pluginhandler' : 'armedInstant'},
+    '07' : {'name' : 'EXIT_ENTRY_DELAY', 'description' : 'Entry or Exit Delay'},
+    '08' : {'name' : 'IN_ALARM', 'description' : 'Partition is in Alarm', 'pluginhandler' : 'alarmTriggered'},
+    '09' : {'name' : 'ALARM_IN_MEMORY', 'description' : 'Alarm Has Occurred (Alarm in Memory)', 'pluginhandler' : 'alarmCleared'}
 }
 
 evl_Virtual_Keypad_How_To_Beep = {
@@ -84,7 +72,7 @@ evl_Virtual_Keypad_How_To_Beep = {
 
 evl_CID_Qualifiers = {
     1 : 'New Event or Opening',
-    3 : 'New Restore or Closing',  
+    3 : 'New Restore or Closing',
     6 : 'Previously Reported Condition Still Present'
 }
 
@@ -152,7 +140,7 @@ evl_CID_Events = {
     123 : {
     "label" : "Alarm, 24-hour Audible",
     "type"  : "zone",
-    },       
+    },
     124 : {
     "label" : "Duress - Access granted",
     "type"  : "zone",
@@ -563,7 +551,3 @@ evl_CID_Events = {
     "type"  : "user",
     },
 }
-
-
- 
- 

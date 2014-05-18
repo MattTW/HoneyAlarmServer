@@ -185,8 +185,8 @@ class HTTPChannel(asynchat.async_chat):
         self.push('Content-type: application/json\r\n')
         self.push('Expires: Sat, 26 Jul 1997 05:00:00 GMT\r\n')
         self.push('Last-Modified: '+ datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")+' GMT\r\n')
-        self.push('Cache-Control: no-store, no-cache, must-revalidate\r\n' ) 
-        self.push('Cache-Control: post-check=0, pre-check=0\r\n') 
+        self.push('Cache-Control: no-store, no-cache, must-revalidate\r\n' )
+        self.push('Cache-Control: post-check=0, pre-check=0\r\n')
         self.push('Pragma: no-cache\r\n' )
         self.push('\r\n')
         self.push(content)
@@ -279,7 +279,7 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def handle_line(self, input):
         if input != '':
- 
+
             alarmserver_logger('----------------------------------------')
             alarmserver_logger('RX < ' + input)
             if input[0] in ("%","^"):
@@ -291,8 +291,8 @@ class EnvisalinkClient(asynchat.async_chat):
                 #assume it is login info
                 code = input
                 data = ''
-            
-            
+
+
             try:
                 handler = "handle_%s" % evl_ResponseTypes[code]['handler']
             except KeyError:
@@ -304,10 +304,10 @@ class EnvisalinkClient(asynchat.async_chat):
             except AttributeError:
                 raise CodeError("Handler function doesn't exist")
 
-            
+
             handlerFunc(data)
             alarmserver_logger('----------------------------------------')
- 
+
 
     #envisalink event handlers, some events are unhandled.
     def handle_login(self, data):
@@ -337,21 +337,21 @@ class EnvisalinkClient(asynchat.async_chat):
         beep = evl_Virtual_Keypad_How_To_Beep.get(dataList[3],'unknown')
         alpha = dataList[4]
 
- 
+
         self.ensure_init_alarmstate(partitionNumber)
         ALARMSTATE['partition'][partitionNumber]['status'].update( {'alarm' : bool(flags.alarm), 'alarm_in_memory' : bool(flags.alarm_in_memory), 'armed_away' : bool(flags.armed_away),
                                                         'ac_present' : bool(flags.ac_present), 'armed_bypass' : bool(flags.bypass), 'chime' : bool(flags.chime),
                                                         'armed_zero_entry_delay' : bool(flags.armed_zero_entry_delay), 'alarm_fire_zone' : bool(flags.alarm_fire_zone),
                                                         'trouble' : bool(flags.system_trouble), 'ready' : bool(flags.ready), 'fire' : bool(flags.fire),
                                                         'armed_stay' : bool(flags.armed_stay),
-                                                        'alpha' : alpha,  
+                                                        'alpha' : alpha,
                                                         'beep' : beep,
                                                         })
-        
+
         #if we have never yet received a partition state changed event,  we need to compute the armed state ourselves.   Don't want to always do it here because we can't also
         #figure out if we are in entry/exit delay from here
         if not self._has_partition_state_changed:
-            ALARMSTATE['partition'][partitionNumber]['status'].update( {'armed' : bool(flags.armed_away or flags.bypass or flags.armed_zero_entry_delay or flags.armed_stay)})
+            ALARMSTATE['partition'][partitionNumber]['status'].update( {'armed' : bool(flags.armed_away or flags.armed_zero_entry_delay or flags.armed_stay)})
 
         alarmserver_logger(json.dumps(ALARMSTATE))
 
@@ -363,27 +363,47 @@ class EnvisalinkClient(asynchat.async_chat):
     def handle_partition_state_change(self,data):
         self._has_partition_state_changed = True
         for currentIndex in range(0,8):
-            partitionState = data[currentIndex*2:(currentIndex*2)+2]
-            if partitionState != PartitionStatusCode.NOT_USED:
+            partitionStateCode = data[currentIndex*2:(currentIndex*2)+2]
+            partitionState = evl_Partition_Status_Codes[str(partitionStateCode)]
+            if partitionState['name'] != 'NOT_USED':
                 partitionNumber = currentIndex + 1
+                #TODO can we use dict.setdefault or defaultdict here instead?
                 self.ensure_init_alarmstate(partitionNumber)
                 previouslyArmed = ALARMSTATE['partition'][partitionNumber]['status'].get('armed',False)
-                armed = partitionState == PartitionStatusCode.ARMED_STAY or partitionState == PartitionStatusCode.ARMED_AWAY or partitionState == PartitionStatusCode.ARMED_MAX
-                ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay' : bool(partitionState == PartitionStatusCode.EXIT_ENTRY_DELAY and not previouslyArmed),
-                                                                           'entry_delay' : bool (partitionState == PartitionStatusCode.EXIT_ENTRY_DELAY and previouslyArmed),
+                armed = partitionState['name'] == 'ARMED_STAY' or 'ARMED_AWAY' or 'ARMED_MAX'
+                ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay' : bool(partitionState['name'] == 'EXIT_ENTRY_DELAY' and not previouslyArmed),
+                                                                           'entry_delay' : bool (partitionState['name'] == 'EXIT_ENTRY_DELAY' and previouslyArmed),
                                                                            'armed' : armed } )
 
-                alarmserver_logger('Parition ' + str(partitionNumber) + ' is in state ' + evl_Partition_Status_Codes[partitionState])
+                alarmserver_logger('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
                 alarmserver_logger(json.dumps(ALARMSTATE))
                 #notify plugins of state changes
-                if armed and not previouslyArmed:
-                    for plugin in self.plugins:
-                        plugin.armedAway()
+                self.notify_plugins(partitionState)
 
-                if not armed and previouslyArmed:
-                    for plugin in self.plugins:
-                        plugin.disarmed()
 
+    def notify_plugins(self,partitionState):
+      # if armed and not previouslyArmed:
+      #     for plugin in self.plugins:
+      #         plugin.armedAway()
+      #
+      # if not armed and previouslyArmed:
+      #     for plugin in self.plugins:
+      #         plugin.disarmed()
+
+
+      try:
+          handler = partitionState['pluginhandler']
+      except KeyError:
+          alarmserver_logger('No handler defined for '+partitionState['name']+', skipping...')
+          return
+
+      for plugin in self.plugins:
+          try:
+              handlerFunc = getattr(plugin, handler)
+          except AttributeError:
+              raise CodeError("Handler function %s doesn't exist in plugin %s" % (handler,plugin))
+
+          handlerFunc()
 
     def handle_realtime_cid_event(self,data):
         qualifier = evl_CID_Qualifiers[int(data[0])]
@@ -550,7 +570,7 @@ if __name__=="__main__":
 
 
     server = AlarmServer(config)
- 
+
     try:
         while True:
             asyncore.loop(timeout=2, count=1)
@@ -560,7 +580,7 @@ if __name__=="__main__":
         alarmserver_logger('Shutting down from Ctrl+C')
         if LOGTOFILE:
             outfile.close()
-        
-        server.shutdown(socket.SHUT_RDWR) 
-        server.close() 
+
+        server.shutdown(socket.SHUT_RDWR)
+        server.close()
         sys.exit()
