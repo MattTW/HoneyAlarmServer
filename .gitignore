@@ -5,3 +5,5 @@ alarmserver.cfg
 output.log
 indigoPlugin.cfg
 sssPlugin.cfg
+sample CID.txt
+pushoverPlugin.cfg
