@@ -5,7 +5,6 @@ from requests.auth import HTTPDigestAuth
 
 class IndigoPlugin(BasePlugin):
     def __init__(self, configfile):
-        print("config file name is " + configfile)
         self._config = ConfigParser.ConfigParser()
         self._config.read(configfile)
 
@@ -34,10 +33,8 @@ class IndigoPlugin(BasePlugin):
         r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
         r = self._session.put(self._urlbase + 'alarmArmedHome', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
-    def alarmTriggered(self,user):
-        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+    def alarmTriggered(self,zone):
         r = self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(True)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
-    def alarmCleared(self,user):
-        r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+    def alarmCleared(self,zone):
         r = self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))

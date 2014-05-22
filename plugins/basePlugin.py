@@ -16,10 +16,10 @@ class BasePlugin(object):
     def disarmedHome(self,user):
       return
 
-    def alarmTriggered(self,user):
+    def alarmTriggered(self,zone):
       return
 
-    def alarmCleared(self,user):
+    def alarmCleared(self,zone):
       return
 
     #utility methods for config

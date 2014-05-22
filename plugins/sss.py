@@ -5,7 +5,6 @@ from requests.auth import HTTPDigestAuth
 
 class sssPlugin(BasePlugin):
     def __init__(self, configfile):
-        print("config file name is " + configfile)
         self._config = ConfigParser.ConfigParser()
         self._config.read(configfile)
 
@@ -33,10 +32,10 @@ class sssPlugin(BasePlugin):
       if not self.isGuest(user):
           self.cameraEnable(False)
 
-    def alarmTriggered(self,user):
+    def alarmTriggered(self,zone):
       self.cameraRecord(True)
 
-    def alarmCleared(self,user):
+    def alarmCleared(self,zone):
       self.cameraRecord(False)
 
     def signonSS(self):

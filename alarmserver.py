@@ -376,42 +376,49 @@ class EnvisalinkClient(asynchat.async_chat):
 
 
     def handle_realtime_cid_event(self,data):
-        qualifierInt = int(data[0])
-        qualifier = evl_CID_Qualifiers[qualifierInt]
+        eventTypeInt = int(data[0])
+        eventType = evl_CID_Qualifiers[eventTypeInt]
         cidEventInt = int(data[1:4])
         cidEvent = evl_CID_Events[cidEventInt]
         partition = data[4:6]
-        zoneOrUser = data[6:9]
+        zoneOrUser = int(data[6:9])
 
-        alarmserver_logger('Event Type is '+qualifier)
+        alarmserver_logger('Event Type is '+eventType)
         alarmserver_logger('CID Type is '+cidEvent['type'])
         alarmserver_logger('CID Description is '+cidEvent['label'])
         alarmserver_logger('Partition is '+partition)
-        alarmserver_logger(cidEvent['type'] + ' value is ' + zoneOrUser)
+        alarmserver_logger(cidEvent['type'] + ' value is ' + str(zoneOrUser))
 
         #notify plugins about if it is an event about arming or alarm
-        currentUser = self._config.ALARMUSERNAMES[int(zoneOrUser)]
-        if not currentUser: currentUser = 'Unknown!'
-        alarmserver_logger('Mapped User is ' + currentUser)
-        if cidEventInt == 401 and qualifierInt == 3:   #armed away or instant/max
+        if cidEvent['type'] == 'user':
+            currentUser = self._config.ALARMUSERNAMES[int(zoneOrUser)]
+            if not currentUser: currentUser = 'Unknown!'
+            currentZone = 'N/A'
+        if cidEvent['type'] == 'zone':
+            currentZone = self._config.ZONENAMES[int(zoneOrUser)]
+            if not currentZone: currentZone = 'Unknown!'
+            currentUser = 'N/A'
+        alarmserver_logger('Mapped User is ' + currentUser + '. Mapped Zone is ' + currentZone)
+        if cidEventInt == 401 and eventTypeInt == 3:   #armed away or instant/max
             for plugin in self.plugins:
                 plugin.armedAway(currentUser)
-        if cidEventInt == 441 and qualifierInt == 3:   #armed home
+        if cidEventInt == 441 and eventTypeInt == 3:   #armed home
             for plugin in self.plugins:
                 plugin.armedHome(currentUser)
-        if cidEventInt == 401 and qualifierInt == 1:  #disarmed away
+        if cidEventInt == 401 and eventTypeInt == 1:  #disarmed away
             for plugin in self.plugins:
                 plugin.disarmedAway(currentUser)
-        if cidEventInt == 441 and qualifierInt == 1:  #disarmed away
+        if cidEventInt == 441 and eventTypeInt == 1:  #disarmed away
             for plugin in self.plugins:
                 plugin.disarmedHome(currentUser)
         #TODO get the true events to look for on alarm triggered/clear
-        if cidEventInt in (123,124) and qualifierInt == 1:   #alarm triggered
+        #TODO the zone/user value in these cases is a zone not a user, fix this
+        if cidEventInt in (123,124) and eventTypeInt == 1:   #alarm triggered
             for plugin in self.plugins:
-                plugin.alarmTriggered(currentUser)
-        if cidEventInt in (123,124) and qualifierInt == 3:  #alarm cleared
+                plugin.alarmTriggered(currentZone)
+        if cidEventInt in (123,124) and eventTypeInt == 3:  #alarm cleared
             for plugin in self.plugins:
-                plugin.alarmCleared(currentUser)
+                plugin.alarmCleared(currentZone)
 
 
     def ensure_init_alarmstate(self,partitionNumber):
