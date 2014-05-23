@@ -1,47 +1,52 @@
 This project uses the [Ademco TPI provided by Eyez-On](http://forum.eyez-on.com/FORUM/viewtopic.php?f=6&t=301) to allow it to be used with Honeywell/Ademco security panels.
 
-This is a heavily modified version of the parent project. The parent project only implements the DSC Envisalink TPI and does not support Honeywell/Ademco panels. The interfaces provided by the Envisalink vendor for the DSC and Ademco/Honeywell interfaces are fundamenatally different, this project's modifications may never be pulled back into the parent - that remains to be seen. 
+This project was originally a fork of the [AlarmServer project for DSC panels](https://github.com/juggie/AlarmServer) - credit to them for the base code.   However, the API's between DSC and Honeywell are so different that it didn't make sense to try to maintain a single codebase.
 
-This is still beta software.  So far it has only been tested with an Envisalink 3 and Honeywell Vista 15p panel. 0,2 panel state updates sent by the Envisalink as documented in the TPI are tracked by the Alarm Server and can be retrieved via the Web API.   1,3 commands from the Envisalink only log debug messages only at this time.  The "FF" TPI command and application commands to the Envisalink are not yet implemented.
+This is still beta software.  So far it has only been tested with an Envisalink 3 and Honeywell Vista 15p panel.
 
-The Web Interface app is not yet working.   The underlying api, arm, disarm, and armstay http service calls are working, but are providing different data then the sample web client expects.
+# What Works #
 
-The Mac launcher linked to below does work fine with this version of the AlarmServer.
+0,2 panel state updates sent by the Envisalink as documented in the TPI are tracked by the Alarm Server and can be retrieved via the Web API.   1,3 commands from the Envisalink only log debug messages only at this time.  The "FF" TPI command and application commands to the Envisalink are not yet implemented.
+HTTP calls to get current AlarmState, and to arm, disarm and armstay are working.
+Events are triggered for alarm arming and disarming conditions
+The [Mac Launcher app](https://github.com/gschrader/Alarm-Server-Launcher) originally writted for the DSC version of the server works with this app.
 
+# What Doesn't Work #
+
+The Web Interface app is not yet working.
+The Alarm state returned by the HTTP api call only returns partition state information so far.
+Events for Alarm triggered/cleared are not yet working
+
+
+Plugin System
 -------------
+A very basic plugin system has been implemented.   The plugins directory is searched for any python files containing classes that inherit from BasePlugin.
 
-The ssl certificates that are provided are intended for demo purposes only.  
-Please use openssl to generate your own. A quick HOWTO is below.
+These classes override whatever events they are interested in responding to.  A cfg file of the format <ClassName>.cfg is automatically loaded if present.
 
-As with any project documentation is key, there is plenty more to go in here and
-it will hopefully be soon!
 
-Config:
+Config
+-------
 Please see the alarmserver-example.cfg and rename to alarmserver.cfg and
 customize to requirements.
 
+There are example plugins in the plugin-examples directory.  Copy/modify and place them in the plugins directory along with a valid cfg file to use them
 
-Web Interface
--------------
-The web interface uses a responsive design which limits the scrolling on both desktop and mobile.
-
-### Desktop ###
-![Desktop](http://gschrader.github.io/Alarm-Server-Launcher/desktop.png)
-
-### Mobile ###
-![Mobile](http://gschrader.github.io/Alarm-Server-Launcher/mobile.png)
 
 
 OpenSSL Certificate Howto
 -------------------
 
+The ssl certificates that are provided are intended for demo purposes only.  
+Please use openssl to generate your own. A quick HOWTO is below.
+
 To generate a self signed cert issue the following in a command prompt:
 `openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout server.key -out server.crt`
 
 Openssl will ask you some questions. The only semi-important one is the 'common name' field.
-You want this set to your servers fqdn. IE alarmserver.example.com. 
+You want this set to your servers fqdn. IE alarmserver.example.com.
 
-If you have a real ssl cert from a certificate authority and it has intermediate certs then you'll need to bundle them all up or the webbrowser will complain about it not being a valid cert. To bundle the certs use cat to include your cert, then the intermediates (ie cat mycert.crt > combined.crt; cat intermediates.crt >> combined.crt) 
+If you have a real ssl cert from a certificate authority and it has intermediate certs then you'll need to bundle them all up or the webbrowser will complain about it not being a valid cert. To bundle the certs use cat to include your cert, then the intermediates (ie cat mycert.crt > combined.crt; cat intermediates.crt >> combined.crt)
 
 
 Dependencies:
@@ -61,7 +66,7 @@ REST API Info
 */api*
 
 * Returns a JSON dump of all currently known states
- 
+
 */api/alarm/arm*
 
 * Quick arm
@@ -80,18 +85,3 @@ REST API Info
 * Disarm system
    * Optional param = **alarmcode**
    * If alarmcode param is missing the config file value is used instead
-
-*/api/pgm*
-
-* Activate a PGM output:
-  * Required param = **pgmnum**
-  * Required param = **alarmcode**
-
-*/api/refresh*
-
-* Refresh data from alarm panel
-
-*/api/config/eventtimeago* 
-
-* Returns status of eventtimeago from the config file
-
