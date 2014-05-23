@@ -1,21 +1,24 @@
-This project uses the [Ademco TPI provided by Eyez-On](http://forum.eyez-on.com/FORUM/viewtopic.php?f=6&t=301) to allow it to be used with Honeywell/Ademco security panels.
+This project uses the [Ademco TPI provided by Eyez-On](http://forum.eyez-on.com/FORUM/viewtopic.php?f=6&t=301).  It processes events and passes commands to the Envisalink server and provides an easy to use HTTP interface for clients to all.
 
 This project was originally a fork of the [AlarmServer project for DSC panels](https://github.com/juggie/AlarmServer) - credit to them for the base code.   However, the API's between DSC and Honeywell are so different that it didn't make sense to try to maintain a single codebase.
 
 This is still beta software.  So far it has only been tested with an Envisalink 3 and Honeywell Vista 15p panel.
 
-# What Works #
+#### What Works ####
 
-0,2 panel state updates sent by the Envisalink as documented in the TPI are tracked by the Alarm Server and can be retrieved via the Web API.   1,3 commands from the Envisalink only log debug messages only at this time.  The "FF" TPI command and application commands to the Envisalink are not yet implemented.
-HTTP calls to get current AlarmState, and to arm, disarm and armstay are working.
-Events are triggered for alarm arming and disarming conditions
-The [Mac Launcher app](https://github.com/gschrader/Alarm-Server-Launcher) originally writted for the DSC version of the server works with this app.
+ + keypad update and partition state updates sent by the Envisalink as documented in the TPI are tracked by the Alarm Server and can be retrieved via the Web API.  
+ + Some CID events (alarm arm/disarm) are processed and trigger plugin events.
+ + HTTP calls to get current AlarmState, and to arm, disarm and armstay the alarm system are working.
+ + Events are triggered for most alarm arming and disarming conditions
+ + The [Mac Launcher app](https://github.com/gschrader/Alarm-Server-Launcher) originally writted for the DSC version of the server works with this app.
 
-# What Doesn't Work #
+#### What Doesn't Work ####
 
-The Web Interface app is not yet working.
-The Alarm state returned by the HTTP api call only returns partition state information so far.
-Events for Alarm triggered/cleared are not yet working
++ The Web Interface app is not yet working.
++ Zone state change messages from the TPI seem to currently be buggy and are only logged at this time.
++ The Alarm state returned by the HTTP api call only returns partition state information so far.
++ Events for Alarm triggered/cleared are not yet working
++ The "FF" TPI command and application level commands to the Envisalink are not yet implemented.
 
 
 Plugin System
