@@ -16,14 +16,12 @@ import json
 import hashlib
 import time
 import getopt
+import logging
 
 from envisalinkdefs import *
 from plugins.basePlugin import BasePlugin
+from baseConfig import BaseConfig
 
-
-LOGTOFILE = False
-
-class CodeError(Exception): pass
 
 ALARMSTATE={'version' : 0.1}
 MAXPARTITIONS=16
@@ -31,63 +29,11 @@ MAXZONES=128
 MAXALARMUSERS=47
 
 
-def getMessageType(code):
-    return evl_ResponseTypes[code]
 
-def alarmserver_logger(message, type = 0, level = 0):
-    if LOGTOFILE:
-        outfile.write(str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))+' '+message+'\n')
-        outfile.flush()
-    else:
-        print (str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))+' '+message)
-
-#simple plugin system
-def find_subclasses(path, cls):
-    """
-    Find all subclass of cls in py files located below path
-    (does look in sub directories)
-    """
-
-    subclasses=[]
-
-    def look_for_subclass(modulename):
-        alarmserver_logger("searching %s" % (modulename))
-        module=__import__(modulename)
-
-        #walk the dictionaries to get to the last one
-        d=module.__dict__
-        for m in modulename.split('.')[1:]:
-            d=d[m].__dict__
-
-        #look through this dictionary for things that are subclass of Job but are not Job itself
-        for key, entry in d.items():
-            if key == cls.__name__:
-                continue
-
-            try:
-                if issubclass(entry, cls):
-                    alarmserver_logger("Found subclass: "+key)
-                    subclasses.append(entry)
-            except TypeError:
-                #this happens when a non-type is passed in to issubclass. We
-                #don't care as it can't be a subclass of Job if it isn't a type
-                continue
-
-    for root, dirs, files in os.walk(path):
-        for name in files:
-            if name.endswith(".py") and not name.startswith("__"):
-                path = os.path.join(root[2:], name)     #remove ./ from beginning of root
-                modulename = path.rsplit('.', 1)[0].replace('/', '.')
-                look_for_subclass(modulename)
-
-    return subclasses
-
-
-class AlarmServerConfig():
+class AlarmServerConfig(BaseConfig):
     def __init__(self, configfile):
-
-        self._config = ConfigParser.ConfigParser()
-        self._config.read(configfile)
+        #call ancestor for common setup
+        super(self.__class__, self).__init__(configfile)
 
         self.LOGURLREQUESTS = self.read_config_var('alarmserver', 'logurlrequests', True, 'bool')
         self.HTTPSPORT = self.read_config_var('alarmserver', 'httpsport', 8111, 'int')
@@ -98,17 +44,10 @@ class AlarmServerConfig():
         self.ENVISALINKHOST = self.read_config_var('envisalink', 'host', 'envisalink', 'str')
         self.ENVISALINKPORT = self.read_config_var('envisalink', 'port', 4025, 'int')
         self.ENVISALINKPASS = self.read_config_var('envisalink', 'pass', 'user', 'str')
-        self.ENABLEPROXY = self.read_config_var('envisalink', 'enableproxy', True, 'bool')
-        self.ENVISALINKPROXYPORT = self.read_config_var('envisalink', 'proxyport', self.ENVISALINKPORT, 'int')
-        self.ENVISALINKPROXYPASS = self.read_config_var('envisalink', 'proxypass', self.ENVISALINKPASS, 'str')
         self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
         self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
         self.LOGFILE = self.read_config_var('alarmserver', 'logfile', '', 'str')
-        global LOGTOFILE
-        if self.LOGFILE == '':
-            LOGTOFILE = False
-        else:
-            LOGTOFILE = True
+
 
         self.PARTITIONNAMES={}
         for i in range(1, MAXPARTITIONS+1):
@@ -121,22 +60,6 @@ class AlarmServerConfig():
         self.ALARMUSERNAMES={}
         for i in range(1, MAXALARMUSERS+1):
             self.ALARMUSERNAMES[i]=self.read_config_var('alarmserver', 'user'+str(i), False, 'str', True)
-
-    def defaulting(self, section, variable, default, quiet = False):
-        if quiet == False:
-            print('Config option '+ str(variable) + ' not set in ['+str(section)+'] defaulting to: \''+str(default)+'\'')
-
-    def read_config_var(self, section, variable, default, type = 'str', quiet = False):
-        try:
-            if type == 'str':
-                return self._config.get(section,variable)
-            elif type == 'bool':
-                return self._config.getboolean(section,variable)
-            elif type == 'int':
-                return int(self._config.get(section,variable))
-        except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
-            self.defaulting(section, variable, default, quiet)
-            return default
 
 class HTTPChannel(asynchat.async_chat):
     def __init__(self, server, sock, addr):
@@ -206,6 +129,7 @@ class EnvisalinkClient(asynchat.async_chat):
         # Call parent class's __init__ method
         asynchat.async_chat.__init__(self)
 
+
         # Define some private instance variables
         self._buffer = []
 
@@ -229,16 +153,58 @@ class EnvisalinkClient(asynchat.async_chat):
         # find plugins and load/config them
         self.plugins = []
 
-        pluginClasses = find_subclasses("./plugins/", BasePlugin)
+        pluginClasses = self.find_subclasses("./plugins/", BasePlugin)
         for plugin in pluginClasses:
             plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
             self.plugins.append(plugin(plugincfg))
 
+    #simple plugin system
+    def find_subclasses(self,path, cls):
+        """
+        Find all subclass of cls in py files located below path
+        (does look in sub directories)
+        """
+
+        subclasses=[]
+
+        def look_for_subclass(modulename):
+            logging.debug("searching %s" % (modulename))
+            module=__import__(modulename)
+
+            #walk the dictionaries to get to the last one
+            d=module.__dict__
+            for m in modulename.split('.')[1:]:
+                d=d[m].__dict__
+
+            #look through this dictionary for things that are subclass of Job but are not Job itself
+            for key, entry in d.items():
+                if key == cls.__name__:
+                    continue
+
+                try:
+                    if issubclass(entry, cls):
+                        logging.debug("Found subclass: "+key)
+                        subclasses.append(entry)
+                except TypeError:
+                    #this happens when a non-type is passed in to issubclass. We
+                    #don't care as it can't be a subclass of Job if it isn't a type
+                    continue
+
+        for root, dirs, files in os.walk(path):
+            for name in files:
+                if name.endswith(".py") and not name.startswith("__"):
+                    path = os.path.join(root[2:], name)     #remove ./ from beginning of root
+                    modulename = path.rsplit('.', 1)[0].replace('/', '.')
+                    look_for_subclass(modulename)
+
+        return subclasses
+
+
+
     def do_connect(self, reconnect = False):
         # Create the socket and connect to the server
         if reconnect == True:
-            alarmserver_logger('Connection failed, retrying in '+str(self._retrydelay)+ ' seconds')
-            alarmserver_logger('resetting input buffer')
+            logging.warning('Connection failed, retrying in '+str(self._retrydelay)+ ' seconds')
             self._buffer = []
             for i in range(0, self._retrydelay):
                 time.sleep(1)
@@ -257,16 +223,16 @@ class EnvisalinkClient(asynchat.async_chat):
         self._buffer = []
 
     def handle_connect(self):
-        alarmserver_logger("Connected to %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
+        logging.info("Connected to %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
 
     def handle_close(self):
         self._loggedin = False
         self.close()
-        alarmserver_logger("Disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
+        logging.info("Disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
         self.do_connect(True)
 
     def send_data(self,data):
-        alarmserver_logger('TX > '+data)
+        logging.debug('TX > '+data)
         self.push(data)
 
     def send_envisalink_command(self, code, data):
@@ -276,8 +242,8 @@ class EnvisalinkClient(asynchat.async_chat):
     def handle_line(self, input):
         if input != '':
 
-            alarmserver_logger('----------------------------------------')
-            alarmserver_logger('RX < ' + input)
+            logging.debug('----------------------------------------')
+            logging.debug('RX < ' + input)
             if input[0] in ("%","^"):
                 #keep first sentinel char to tell difference between tpi and Envisalink command responses.  Drop the trailing $ sentinel.
                 inputList = input[0:-1].split(',')
@@ -292,17 +258,17 @@ class EnvisalinkClient(asynchat.async_chat):
             try:
                 handler = "handle_%s" % evl_ResponseTypes[code]['handler']
             except KeyError:
-                alarmserver_logger('No handler defined for '+code+', skipping...')
+                logging.warning('No handler defined for '+code+', skipping...')
                 return
 
             try:
                 handlerFunc = getattr(self, handler)
             except AttributeError:
-                raise CodeError("Handler function doesn't exist")
+                raise RuntimeError("Handler function doesn't exist")
 
 
             handlerFunc(data)
-            alarmserver_logger('----------------------------------------')
+            logging.debug('----------------------------------------')
 
 
     #envisalink event handlers, some events are unhandled.
@@ -311,19 +277,19 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def handle_login_success(self,data):
         self._loggedin = True
-        alarmserver_logger('Password accepted, session created')
+        logging.info('Password accepted, session created')
 
     def handle_login_failure(self, data):
-        alarmserver_logger('Password is incorrect. Server is closing socket connection.')
+        logging.error('Password is incorrect. Server is closing socket connection.')
 
     def handle_login_timeout(self,data):
-        alarmserver_logger('Envisalink timed out waiting for password, whoops that should never happen. Server is closing socket connection')
+        logging.error('Envisalink timed out waiting for password, whoops that should never happen. Server is closing socket connection')
 
     def handle_keypad_update(self,data):
         dataList = data.split(',')
         #make sure data is in format we expect, current TPI seems to send bad data every so ofen
         if len(dataList) !=5 or "%" in data:
-            alarmserver_logger("Data format invalid from Envisalink, ignoring...")
+            logging.error("Data format invalid from Envisalink, ignoring...")
             return
 
         partitionNumber = int(dataList[0])
@@ -349,12 +315,12 @@ class EnvisalinkClient(asynchat.async_chat):
         if not self._has_partition_state_changed:
             ALARMSTATE['partition'][partitionNumber]['status'].update( {'armed' : bool(flags.armed_away or flags.armed_zero_entry_delay or flags.armed_stay)})
 
-        alarmserver_logger(json.dumps(ALARMSTATE))
+        logging.debug(json.dumps(ALARMSTATE))
 
 
     def handle_zone_state_change(self,data):
         #Honeywell Panels or Envisalink currently does not seem to generate these events
-        alarmserver_logger('zone state change handler not implemented yet')
+        logging.debug('zone state change handler not implemented yet')
 
     def handle_partition_state_change(self,data):
         self._has_partition_state_changed = True
@@ -371,8 +337,8 @@ class EnvisalinkClient(asynchat.async_chat):
                                                                            'entry_delay' : bool (partitionState['name'] == 'EXIT_ENTRY_DELAY' and previouslyArmed),
                                                                            'armed' : armed } )
 
-                alarmserver_logger('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
-                alarmserver_logger(json.dumps(ALARMSTATE))
+                logging.debug('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
+                logging.debug(json.dumps(ALARMSTATE))
 
 
     def handle_realtime_cid_event(self,data):
@@ -383,11 +349,11 @@ class EnvisalinkClient(asynchat.async_chat):
         partition = data[4:6]
         zoneOrUser = int(data[6:9])
 
-        alarmserver_logger('Event Type is '+eventType)
-        alarmserver_logger('CID Type is '+cidEvent['type'])
-        alarmserver_logger('CID Description is '+cidEvent['label'])
-        alarmserver_logger('Partition is '+partition)
-        alarmserver_logger(cidEvent['type'] + ' value is ' + str(zoneOrUser))
+        logging.debug('Event Type is '+eventType)
+        logging.debug('CID Type is '+cidEvent['type'])
+        logging.debug('CID Description is '+cidEvent['label'])
+        logging.debug('Partition is '+partition)
+        logging.debug(cidEvent['type'] + ' value is ' + str(zoneOrUser))
 
         #notify plugins about if it is an event about arming or alarm
         if cidEvent['type'] == 'user':
@@ -398,7 +364,7 @@ class EnvisalinkClient(asynchat.async_chat):
             currentZone = self._config.ZONENAMES[int(zoneOrUser)]
             if not currentZone: currentZone = 'Unknown!'
             currentUser = 'N/A'
-        alarmserver_logger('Mapped User is ' + currentUser + '. Mapped Zone is ' + currentZone)
+        logging.debug('Mapped User is ' + currentUser + '. Mapped Zone is ' + currentZone)
         if cidEventInt == 401 and eventTypeInt == 3:   #armed away or instant/max
             for plugin in self.plugins:
                 plugin.armedAway(currentUser)
@@ -466,17 +432,17 @@ class AlarmServer(asyncore.dispatcher):
         # Accept the connection
         conn, addr = self.accept()
         if (config.LOGURLREQUESTS):
-            alarmserver_logger('Incoming web connection from %s' % repr(addr))
+            logging.info('Incoming web connection from %s' % repr(addr))
 
         try:
             HTTPChannel(self, ssl.wrap_socket(conn, server_side=True, certfile=config.CERTFILE, keyfile=config.KEYFILE, ssl_version=ssl.PROTOCOL_TLSv1), addr)
         except ssl.SSLError as e:
-            alarmserver_logger("SSL error({0}): {1}".format(e.errno, e.strerror))
+            logging.error("SSL error({0}): {1}".format(e.errno, e.strerror))
             return
 
     def handle_request(self, channel, method, request, header):
         if (config.LOGURLREQUESTS):
-            alarmserver_logger('Web request: '+str(method)+' '+str(request))
+            logging.info('Web request: '+str(method)+' '+str(request))
 
         query = urlparse.urlparse(request)
         query_array = urlparse.parse_qs(query.query, True)
@@ -498,12 +464,6 @@ class AlarmServer(asyncore.dispatcher):
         elif query.path == '/api/alarm/armwithcode':
             self._envisalinkclient.send_data(str(query_array['alarmcode'][0])+'2')
             channel.pushok(json.dumps({'response' : 'Arm With Code command sent to Envisalink.'}))
-        elif query.path == '/api/pgm':
-            channel.pushok(json.dumps({'response' : 'Request to trigger PGM'}))
-            #self._envisalinkclient.send_command('020', '1' + str(query_array['pgmnum'][0]))
-            #self._envisalinkclient.send_command('071', '1' + "*7" + str(query_array['pgmnum'][0]))
-            #time.sleep(1)
-            #self._envisalinkclient.send_command('071', '1' + str(query_array['alarmcode'][0]))
         elif query.path == '/api/alarm/disarm':
             self._envisalinkclient.send_data(alarmcode+'1')
             channel.pushok(json.dumps({'response' : 'Disarm command sent to Envisalink.'}))
@@ -525,14 +485,14 @@ class AlarmServer(asyncore.dispatcher):
                         f.close()
                         channel.pushfile(query.path.split('/')[1])
                 except IOError as e:
-                    print "I/O error({0}): {1}".format(e.errno, e.strerror)
+                    logging.error("I/O error({0}): {1}".format(e.errno, e.strerror))
                     channel.pushstatus(404, "Not found")
                     channel.push("Content-type: text/html\r\n")
                     channel.push("File not found")
                     channel.push("\r\n")
             else:
                 if (config.LOGURLREQUESTS):
-                    alarmserver_logger("Invalid file requested")
+                    logging.info("Invalid file requested")
 
                 channel.pushstatus(404, "Not found")
                 channel.push("Content-type: text/html\r\n")
@@ -558,17 +518,23 @@ def main(argv):
 
 
 if __name__=="__main__":
+
+
     conffile='alarmserver.cfg'
     main(sys.argv[1:])
+
     print('Using configuration file %s' % conffile)
     config = AlarmServerConfig(conffile)
-    if LOGTOFILE:
-        outfile=open(config.LOGFILE,'a')
-        print ('Writing logfile to %s' % config.LOGFILE)
+    loggingconfig = { 'level' : logging.DEBUG,
+                      'format':'%(asctime)s %(levelname)s %(message)s',
+                      'datefmt' : '%a, %d %b %Y %H:%M:%S'}
+    if config.LOGFILE != '':
+        loggingconfig['filename'] = config.LOGFILE
+    logging.basicConfig(**loggingconfig)
 
-    alarmserver_logger('Alarm Server Starting')
-    alarmserver_logger('Currently Supporting Envisalink 2DS/3 only')
-    alarmserver_logger('Tested on a Honeywell Vista 15p + EVL-3')
+    logging.info('Alarm Server Starting')
+    logging.info('Currently Supporting Envisalink 2DS/3 only')
+    logging.info('Tested on a Honeywell Vista 15p + EVL-3')
 
 
     server = AlarmServer(config)
@@ -576,12 +542,10 @@ if __name__=="__main__":
     try:
         while True:
             asyncore.loop(timeout=2, count=1)
-            # insert scheduling code here.
     except KeyboardInterrupt:
         print "Crtl+C pressed. Shutting down."
-        alarmserver_logger('Shutting down from Ctrl+C')
-        if LOGTOFILE:
-            outfile.close()
+        logging.info('Shutting down from Ctrl+C')
+
 
         server.shutdown(socket.SHUT_RDWR)
         server.close()

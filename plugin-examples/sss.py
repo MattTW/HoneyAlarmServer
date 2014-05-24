@@ -1,12 +1,13 @@
 import requests
 import ConfigParser
+import logging
 from basePlugin import BasePlugin
 from requests.auth import HTTPDigestAuth
 
 class sssPlugin(BasePlugin):
     def __init__(self, configfile):
-        self._config = ConfigParser.ConfigParser()
-        self._config.read(configfile)
+        #call ancestor for common setup
+        super(sssPlugin, self).__init__(configfile)
 
         self._SERVER = self.read_config_var('sss', 'server', 'localhost', 'str')
         self._PORT = self.read_config_var('sss', 'port', 5000, 'int')
@@ -48,7 +49,7 @@ class sssPlugin(BasePlugin):
       r = self._session.get(self._rootURL + "/auth.cgi", params = loginParams)
       self.checkResponse(r,'login')
       if not r.json()['success']:
-        print("Unsuccessful login to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (r.url,r.status_code,r.json()))
+        logging.error("Unsuccessful login to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (r.url,r.status_code,r.json()))
 
     def cameraRecord(self, shouldRecord):
       for camera in self.listCameras():
@@ -80,6 +81,6 @@ class sssPlugin(BasePlugin):
 
     def checkResponse(self,response,action):
         if not response.json()['success']:
-            print("Unsuccessful %s to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (action,response.url,response.status_code,response.json()))
+            logging.error("Unsuccessful %s to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (action,response.url,response.status_code,response.json()))
             return False
         return True

@@ -5,8 +5,9 @@ from requests.auth import HTTPDigestAuth
 
 class IndigoPlugin(BasePlugin):
     def __init__(self, configfile):
-        self._config = ConfigParser.ConfigParser()
-        self._config.read(configfile)
+        #call ancestor for common setup
+        super(IndigoPlugin, self).__init__(configfile)
+
 
         self._SERVER = self.read_config_var('indigo', 'server', 'localhost', 'str')
         self._PORT = self.read_config_var('indigo', 'port', 8176, 'int')
