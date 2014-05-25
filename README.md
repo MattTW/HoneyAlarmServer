@@ -8,17 +8,17 @@ This is still beta software.  So far it has only been tested with an Envisalink 
 
  + keypad update and partition state updates sent by the Envisalink as documented in the TPI are tracked by the Alarm Server and can be retrieved via the Web API.  
  + Some CID events (alarm arm/disarm) are processed and trigger plugin events.
- + HTTP calls to get current AlarmState, and to arm, disarm and armstay the alarm system are working.
+ + HTTP calls to get current AlarmState, change Partition, and to arm, disarm and armstay the alarm system are working.  Note that these calls are currently async, the response only acknowledges that the command was sent to Envisalink, not that it was sucessfully executed.
  + Events are triggered for most alarm arming and disarming conditions
  + The [Mac Launcher app](https://github.com/gschrader/Alarm-Server-Launcher) originally writted for the DSC version of the server works with this app.
 
 #### What Doesn't Work ####
 
-+ The Web Interface app is not yet working.
++ The Web UI is not yet working.
 + Zone state change messages from the TPI seem to currently be buggy and are only logged at this time.
-+ The Alarm state returned by the HTTP api call only returns partition state information so far.
-+ Events for Alarm triggered/cleared are not yet working
-+ The "FF" TPI command and application level commands to the Envisalink are not yet implemented.
++ The Alarm state returned by the HTTP api call only returns partition state information so far (it does not return all the state expected by the Web UI)
++ Events for Alarm triggered/cleared are not yet working.
++ The "Dump Zone Timers" command is not yet implemented.
 
 
 Plugin System
@@ -70,21 +70,21 @@ REST API Info
 
 * Returns a JSON dump of all currently known states
 
+*/api/partition?changeTo=1*
+
+* change to the given partition. Envisalink remembers this as the partition for future commands
+  * Required param = **changeTo** - a partition number between 1 and 8
+
 */api/alarm/arm*
 
-* Quick arm
-
-*/api/alarm/armwithcode?alarmcode=1111*
-
-* Arm with a code
-  * Required param = **alarmcode**
+* arm the security system
 
 */api/alarm/stayarm*
 
-* Stay arm, no code needed
+* Stay arm (a.k.a. Arm Home)
 
 */api/alarm/disarm*
 
 * Disarm system
-   * Optional param = **alarmcode**
-   * If alarmcode param is missing the config file value is used instead
+
+arm,stayarm,disarm can all take optional param **alarmcode**.  If alarmcode param is missing the config file value is used instead

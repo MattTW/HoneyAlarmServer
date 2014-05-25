@@ -34,8 +34,8 @@ class IndigoPlugin(BasePlugin):
         r = self._session.put(self._urlbase + 'alarmGuestMode', data={'value': str(self.isGuest(user))}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
         r = self._session.put(self._urlbase + 'alarmArmedHome', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
-    def alarmTriggered(self,zone):
+    def alarmTriggered(self,alarmDescription, zone):
         r = self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(True)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
-    def alarmCleared(self,zone):
+    def alarmCleared(self,alarmDescription, zone):
         r = self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))

@@ -19,32 +19,38 @@ class PushoverPlugin(BasePlugin):
         }
 
     def armedAway(self,user):
-        self._payload['message'] = "Security Alarm armed away by " + user
+        self._payload['message'] = "Security system armed away by " + user
         r = requests.post(self._urlbase, data=self._payload)
         self.checkresponse(r)
 
     def armedHome(self,user):
-        self._payload['message'] = "Security Alarm armed home by " + user
+        self._payload['message'] = "Security system armed home by " + user
         r = requests.post(self._urlbase, data=self._payload)
         self.checkresponse(r)
 
     def disarmedAway(self,user):
-        self._payload['message'] = "Security Alarm disarmed from away status by " + user
+        self._payload['message'] = "Security system disarmed from away status by " + user
         r = requests.post(self._urlbase, data=self._payload)
         self.checkresponse(r)
 
     def disarmedHome(self,user):
-        self._payload['message'] = "Security Alarm disarmed from home status by " + user
+        self._payload['message'] = "Security system disarmed from home status by " + user
         r = requests.post(self._urlbase, data=self._payload)
         self.checkresponse(r)
 
-    def alarmTriggered(self,zone):
-        self._payload['message'] = "Security Alarm triggered at zone " + zone
+    def alarmTriggered(self, alarmDescription, zone):
+        self._payload['message'] = "Security Alarm triggered at %s.  Description: %s" % (zone,alarmDescription)
+        self._payload['priority'] = "2"
+        self._payload['retry'] = "30"
+        self._payload['expire'] = '86400'
+        self._payload['sound'] = 'siren'
         r = requests.post(self._urlbase, data=self._payload)
+        #TODO utilize receipt in response to for acknowledgement callback
+        #TODO utilize supplementary URL to open eyez-on portal quickly.
         self.checkresponse(r)
 
-    def alarmCleared(self,zone):
-        self._payload['message'] = "Security Alarm cleared at zone " + zone
+    def alarmCleared(self, alarmDescription, zone):
+        self._payload['message'] = "Security Alarm cleared at %s.  Description: %s" % (zone,alarmDescription)
         r = requests.post(self._urlbase, data=self._payload)
         self.checkresponse(r)
 

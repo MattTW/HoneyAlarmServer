@@ -45,7 +45,7 @@ class AlarmServerConfig(BaseConfig):
         self.ENVISALINKHOST = self.read_config_var('envisalink', 'host', 'envisalink', 'str')
         self.ENVISALINKPORT = self.read_config_var('envisalink', 'port', 4025, 'int')
         self.ENVISALINKPASS = self.read_config_var('envisalink', 'pass', 'user', 'str')
-        self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval','60',int)
+        self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval',60,'int')
         self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
         self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
         self.LOGFILE = self.read_config_var('alarmserver', 'logfile', '', 'str')
@@ -209,13 +209,28 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def poll(self):
         if self._loggedin:
-          self.send_command('00','')
-          self._pollthread = threading.Timer(self._config.ENVISAPOLLINTERVAL, self.poll)
-          self._pollthread.start()
+            self.send_command('00','')
+            self._pollthread = threading.Timer(self._config.ENVISAPOLLINTERVAL, self.poll)
+            self._pollthread.start()
 
+    def change_partition(self,partitionNumber):
+        if partitionNumber < 1 or partitionNumber > 8:
+            logging.error("Invalid Partition Number %i specified when trying to change partition, ignoring.", partitionNumber)
+            return
+        if self._loggedin:
+            self.send_command('01', str(partitionNumber))
 
-    def handle_pollresponse(self,code):
-        logging.debug("received poll response from envisalink: " + evl_TPI_Response_Codes[str(code)])
+    def handle_poll_response(self,code):
+        self.checkCommandResponse(code)
+
+    def handle_change_partition_response(self,code):
+        self.checkCommandResponse(code)
+
+    def checkCommandResponse(self,code):
+        responseString = evl_TPI_Response_Codes[code]
+        logging.debug("received response from envisalink: " + responseString)
+        if code != '00':
+          logging.error("error sending command to envisalink.  Response was: " + responseString)
 
 
     def handle_line(self, input):
@@ -357,14 +372,15 @@ class EnvisalinkClient(asynchat.async_chat):
         if cidEventInt == 441 and eventTypeInt == 1:  #disarmed away
             for plugin in self.plugins:
                 plugin.disarmedHome(currentUser)
-        #TODO get the true events to look for on alarm triggered/clear
-        #TODO the zone/user value in these cases is a zone not a user, fix this
-        if cidEventInt in (123,124) and eventTypeInt == 1:   #alarm triggered
+        if cidEventInt in range(131,164) and eventTypeInt == 1:   #alarm triggered
             for plugin in self.plugins:
-                plugin.alarmTriggered(currentZone)
-        if cidEventInt in (123,124) and eventTypeInt == 3:  #alarm cleared
+                plugin.alarmTriggered(cidEvent['label'], currentZone)
+        if cidEventInt in range(131,164) and eventTypeInt == 3:  #alarm in memory cleared
             for plugin in self.plugins:
-                plugin.alarmCleared(currentZone)
+                plugin.alarmCleared(cidEvent['label'], currentZone)
+        if cidEventInt is 406 and eventTypeInt == 1:              #alarm cancelled by user
+            for plugin in self.plugins:
+                plugin.alarmCleared(cidEvent['label'], currentZone)
 
 
     def ensure_init_alarmstate(self,partitionNumber):
@@ -407,6 +423,7 @@ class AlarmServer(asyncore.dispatcher):
         self.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.bind(("", config.HTTPSPORT))
         self.listen(5)
+        logging.info("AlarmServer listening at %s:%i", socket.gethostbyname(socket.gethostname()),config.HTTPSPORT)
 
     def cleanup(self):
         logging.debug("Cleaning up AlarmServer...")
@@ -449,15 +466,18 @@ class AlarmServer(asyncore.dispatcher):
         elif query.path == '/api/alarm/stayarm':
             self._envisalinkclient.send_data(alarmcode+'3')
             channel.pushok(json.dumps({'response' : 'Arm Home command sent to Envisalink.'}))
-        elif query.path == '/api/alarm/armwithcode':
-            self._envisalinkclient.send_data(str(query_array['alarmcode'][0])+'2')
-            channel.pushok(json.dumps({'response' : 'Arm With Code command sent to Envisalink.'}))
         elif query.path == '/api/alarm/disarm':
             self._envisalinkclient.send_data(alarmcode+'1')
             channel.pushok(json.dumps({'response' : 'Disarm command sent to Envisalink.'}))
-        elif query.path == '/api/refresh':
-            channel.pushok(json.dumps({'response' : 'Request to refresh data received'}))
-            #self._envisalinkclient.send_command('001', '')
+        elif query.path == '/api/partition':
+            changeTo = query_array['changeto'][0]
+            if not changeTo.isdigit():
+                channel.pushok(json.dumps({'response' : 'changeTo parameter was missing or not a number, ignored.'}))
+            else:
+                self._envisalinkclient.change_partition(int(changeTo))
+                channel.pushok(json.dumps({'response' : 'Request to change current partition to %s was received.' % changeTo}))
+        elif query.path == '/api/testalarm':
+            self._envisalinkclient.handle_realtime_cid_event('1132010050');
         elif query.path == '/api/config/eventtimeago':
             channel.pushok(json.dumps({'eventtimeago' : str(self._config.EVENTTIMEAGO)}))
         elif query.path == '/img/glyphicons-halflings.png':

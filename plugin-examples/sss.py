@@ -33,10 +33,10 @@ class sssPlugin(BasePlugin):
       if not self.isGuest(user):
           self.cameraEnable(False)
 
-    def alarmTriggered(self,zone):
+    def alarmTriggered(self,alarmDescription, zone):
       self.cameraRecord(True)
 
-    def alarmCleared(self,zone):
+    def alarmCleared(self,alarmDescription, zone):
       self.cameraRecord(False)
 
     def signonSS(self):
