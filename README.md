@@ -1,4 +1,4 @@
-This project uses the [Ademco TPI provided by Eyez-On](http://forum.eyez-on.com/FORUM/viewtopic.php?f=6&t=301).  It processes events and passes commands to the Envisalink server and provides an easy to use HTTP interface for clients to all.
+This project uses the [Ademco TPI provided by Eyez-On](http://forum.eyez-on.com/FORUM/viewtopic.php?f=6&t=301).  It processes events and passes commands to the Envisalink server and provides an easy to use HTTP interface for clients.
 
 This project was originally a fork of the [AlarmServer project for DSC panels](https://github.com/juggie/AlarmServer) - credit to them for the base code.   However, the API's between DSC and Honeywell are so different that it didn't make sense to try to maintain a single codebase.
 
@@ -25,7 +25,7 @@ Plugin System
 -------------
 A very basic plugin system has been implemented.   The plugins directory is searched for any python files containing classes that inherit from BasePlugin.
 
-These classes override whatever events they are interested in responding to.  A cfg file of the format <ClassName>.cfg is automatically loaded if present.
+These classes override whatever events they are interested in responding to.  A cfg file of the format *ClassName*.cfg is automatically loaded if present.
 
 
 Config
