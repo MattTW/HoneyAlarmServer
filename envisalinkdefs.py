@@ -43,11 +43,19 @@ evl_ResponseTypes = {
     '%02' : {'type' : 'partition', 'name' : 'Partition State Change', 'description' : 'A partition change-of-state has occured', 'handler' : 'partition_state_change'},
     '%03' : {'type' : 'system', 'name' : 'Realtime CID Event', 'description' : 'A system event has happened that is signaled to either the Envisalerts servers or the central monitoring station', 'handler' : 'realtime_cid_event'},
     '%FF' : {'name' : 'Envisalink Zone Timer Dump', 'description' : 'This command contains the raw zone timers used inside the Envisalink. The dump is a 256 character packed HEX string representing 64 UINT16 (little endian) zone timers. Zone timers count down from 0xFFFF (zone is open) to 0x0000 (zone is closed too long ago to remember). Each ''tick'' of the zone time is actually 5 seconds so a zone timer of 0xFFFE means ''5 seconds ago''. Remember, the zone timers are LITTLE ENDIAN so the above example would be transmitted as FEFF.'},
-    '^00' : {'type' : 'envisalink', 'name': 'Poll', 'description' : 'Envisalink poll'},
+    '^00' : {'type' : 'envisalink', 'name': 'Poll', 'description' : 'Envisalink poll', 'handler' : 'pollresponse'},
     '^01' : {'type' : 'envisalink', 'name': 'Change Default Partition', 'description': 'Change the partition which keystrokes are sent to when using the virtual keypad.'},
     '^02' : {'type' : 'envisalink', 'name': 'Dump Zone Timers', 'description' : 'This command contains the raw zone timers used inside the Envisalink. The dump is a 256 character packed HEX string representing 64 UINT16 (little endian) zone timers. Zone timers count down from 0xFFFF (zone is open) to 0x0000 (zone is closed too long ago to remember). Each ''tick'' of the zone time is actually 5 seconds so a zone timer of 0xFFFE means ''5 seconds ago''. Remember, the zone timers are LITTLE ENDIAN so the above example would be transmitted as FEFF.'},
 }
 
+evl_TPI_Response_Codes = {
+    '00' : 'No Error - Command Accepted',
+    '01' : 'Receive Buffer Overrun (a command is received while another is still being processed)',
+    '02' : 'Unknown Command',
+    '03' : 'Syntax Error. Data appended to the command is incorrect in some fashion',
+    '04' : 'Receive Buffer Overflow',
+    '05' : 'Receive State Machine Timeout (command not completed within 3 seconds)'
+}
 evl_Partition_Status_Codes = {
     '00' : {'name' : 'NOT_USED', 'description' : 'Partition is not used or doesn''t exist'},
     '01' : {'name' : 'READY', 'description' : 'Ready', 'pluginhandler' : 'disarmed'},

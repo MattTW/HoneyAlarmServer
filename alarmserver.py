@@ -17,6 +17,7 @@ import hashlib
 import time
 import getopt
 import logging
+import threading
 
 from envisalinkdefs import *
 from plugins.basePlugin import BasePlugin
@@ -44,9 +45,11 @@ class AlarmServerConfig(BaseConfig):
         self.ENVISALINKHOST = self.read_config_var('envisalink', 'host', 'envisalink', 'str')
         self.ENVISALINKPORT = self.read_config_var('envisalink', 'port', 4025, 'int')
         self.ENVISALINKPASS = self.read_config_var('envisalink', 'pass', 'user', 'str')
+        self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval','60',int)
         self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
         self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
         self.LOGFILE = self.read_config_var('alarmserver', 'logfile', '', 'str')
+        self.LOGLEVEL = self.read_config_var('alarmserver','loglevel','DEBUG','str')
 
 
         self.PARTITIONNAMES={}
@@ -147,9 +150,6 @@ class EnvisalinkClient(asynchat.async_chat):
         # Reconnect delay
         self._retrydelay = 10
 
-        self.do_connect()
-
-
         # find plugins and load/config them
         self.plugins = []
 
@@ -157,6 +157,15 @@ class EnvisalinkClient(asynchat.async_chat):
         for plugin in pluginClasses:
             plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
             self.plugins.append(plugin(plugincfg))
+
+        self.do_connect()
+
+    def cleanup(self):
+        logging.debug("Cleaning up Envisalink client...")
+        if hasattr(self,'_pollthread'):
+            logging.debug("Stopping the polling thread...")
+            self._pollthread.cancel()
+        self.close()
 
 
     def do_connect(self, reconnect = False):
@@ -185,7 +194,7 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def handle_close(self):
         self._loggedin = False
-        self.close()
+        self.cleanup()
         logging.info("Disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
         self.do_connect(True)
 
@@ -193,9 +202,21 @@ class EnvisalinkClient(asynchat.async_chat):
         logging.debug('TX > '+data)
         self.push(data)
 
-    def send_envisalink_command(self, code, data):
+    #application commands to the envisalink
+    def send_command(self, code, data):
         to_send = '^'+code+','+data+'$'
         self.send_data(to_send)
+
+    def poll(self):
+        if self._loggedin:
+          self.send_command('00','')
+          self._pollthread = threading.Timer(self._config.ENVISAPOLLINTERVAL, self.poll)
+          self._pollthread.start()
+
+
+    def handle_pollresponse(self,code):
+        logging.debug("received poll response from envisalink: " + evl_TPI_Response_Codes[str(code)])
+
 
     def handle_line(self, input):
         if input != '':
@@ -236,6 +257,8 @@ class EnvisalinkClient(asynchat.async_chat):
     def handle_login_success(self,data):
         self._loggedin = True
         logging.info('Password accepted, session created')
+        #periodically ping envisalink
+        self.poll()
 
     def handle_login_failure(self, data):
         logging.error('Password is incorrect. Server is closing socket connection.')
@@ -297,7 +320,6 @@ class EnvisalinkClient(asynchat.async_chat):
 
                 logging.debug('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
                 logging.debug(json.dumps(ALARMSTATE))
-
 
     def handle_realtime_cid_event(self,data):
         eventTypeInt = int(data[0])
@@ -386,6 +408,11 @@ class AlarmServer(asyncore.dispatcher):
         self.bind(("", config.HTTPSPORT))
         self.listen(5)
 
+    def cleanup(self):
+        logging.debug("Cleaning up AlarmServer...")
+        self.close()
+        self._envisalinkclient.cleanup()
+
     def handle_accept(self):
         # Accept the connection
         conn, addr = self.accept()
@@ -397,6 +424,9 @@ class AlarmServer(asyncore.dispatcher):
         except ssl.SSLError as e:
             logging.error("SSL error({0}): {1}".format(e.errno, e.strerror))
             return
+
+    def handle_close(self):
+        self.cleanup()
 
     def handle_request(self, channel, method, request, header):
         if (config.LOGURLREQUESTS):
@@ -483,7 +513,7 @@ if __name__=="__main__":
 
     print('Using configuration file %s' % conffile)
     config = AlarmServerConfig(conffile)
-    loggingconfig = { 'level' : logging.DEBUG,
+    loggingconfig = { 'level' : config.LOGLEVEL,
                       'format':'%(asctime)s %(levelname)s %(message)s',
                       'datefmt' : '%a, %d %b %Y %H:%M:%S'}
     if config.LOGFILE != '':
@@ -504,7 +534,5 @@ if __name__=="__main__":
         print "Crtl+C pressed. Shutting down."
         logging.info('Shutting down from Ctrl+C')
 
-
-        server.shutdown(socket.SHUT_RDWR)
-        server.close()
+        server.cleanup()
         sys.exit()
