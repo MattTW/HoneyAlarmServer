@@ -1,10 +1,11 @@
 *.pyc
 
 alarmserver.cfg
-.idea
 output.log
 indigoPlugin.cfg
 sssPlugin.cfg
 sample CID.txt
 pushoverPlugin.cfg
-plugins
+plugins/*
+!plugins/__init__.py
+!plugins/basePlugin.py
