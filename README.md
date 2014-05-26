@@ -7,26 +7,33 @@ This is still beta software.  So far it has only been tested with an Envisalink 
 #### What Works ####
 
  + keypad update and partition state updates sent by the Envisalink as documented in the TPI are tracked by the Alarm Server and can be retrieved via the Web API.  
- + Some CID events (alarm arm/disarm) are processed and trigger plugin events.
+ + Events for alarm system arm/disarm and alarm condition trigger/clear are processed and trigger plugin events.
  + HTTP calls to get current AlarmState, change Partition, and to arm, disarm and armstay the alarm system are working.  Note that these calls are currently async, the response only acknowledges that the command was sent to Envisalink, not that it was sucessfully executed.
  + Events are triggered for most alarm arming and disarming conditions
  + The [Mac Launcher app](https://github.com/gschrader/Alarm-Server-Launcher) originally writted for the DSC version of the server works with this app.
+ + "Dump Zone Timers" command is implemented but only prints debug statements for now
 
 #### What Doesn't Work ####
 
-+ The Web UI is not yet working.
++ The Web UI is not yet fully working.
 + Zone state change messages from the TPI seem to currently be buggy and are only logged at this time.
 + The Alarm state returned by the HTTP api call only returns partition state information so far (it does not return all the state expected by the Web UI)
-+ Events for Alarm triggered/cleared are not yet working.
-+ The "Dump Zone Timers" command is not yet implemented.
++ Make HTTP API commands synchronous so they can return success/failure or results
 
 
 Plugin System
 -------------
-A very basic plugin system has been implemented.   The plugins directory is searched for any python files containing classes that inherit from BasePlugin.
+A basic plugin system is available.   The plugins directory is searched for any python files containing classes that inherit from BasePlugin.
 
 These classes override whatever events they are interested in responding to.  A cfg file of the format *ClassName*.cfg is automatically loaded if present.
 
+See the plugin-examples directory for a few samples:
+
+*indigoPlugin* - Communicates status with Indigo home automation servers
+
+*pushoverPlugin* - Sends notifications via the Pushover API to iOS/Android/Desktops
+
+*sssPlugin* - Communicates with Synology Survelliance Station
 
 Config
 -------

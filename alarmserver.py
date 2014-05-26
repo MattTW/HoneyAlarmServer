@@ -18,6 +18,7 @@ import time
 import getopt
 import logging
 import threading
+import struct, re
 
 from envisalinkdefs import *
 from plugins.basePlugin import BasePlugin
@@ -376,16 +377,93 @@ class EnvisalinkClient(asynchat.async_chat):
         if cidEventInt == 441 and eventTypeInt == 1:  #disarmed away
             for plugin in self.plugins:
                 plugin.disarmedHome(currentUser)
-        if cidEventInt in range(131,164) and eventTypeInt == 1:   #alarm triggered
+        if cidEventInt in range(100,164) and eventTypeInt == 1:   #alarm triggered
             for plugin in self.plugins:
                 plugin.alarmTriggered(cidEvent['label'], currentZone)
-        if cidEventInt in range(131,164) and eventTypeInt == 3:  #alarm in memory cleared
+        if cidEventInt in range(100,164) and eventTypeInt == 3:  #alarm in memory cleared
             for plugin in self.plugins:
                 plugin.alarmCleared(cidEvent['label'], currentZone)
         if cidEventInt is 406 and eventTypeInt == 1:              #alarm cancelled by user
             for plugin in self.plugins:
                 plugin.alarmCleared(cidEvent['label'], currentZone)
 
+    #note that a request to dump zone timers generates both a standard command response (handled elsewhere)
+    #as well as this event
+    def handle_zone_timer_dump(self,zoneDump):
+        zoneTimers = self.convertZoneDump(zoneDump)
+        for zoneNumber,zoneTimer in enumerate(zoneTimers,start = 1):
+          zoneName = self._config.ZONENAMES[zoneNumber]
+          if zoneName:
+              logging.debug("%s (zone %i) %s",zoneName,zoneNumber,zoneTimer)
+
+    #convert a zone dump into something humans can make sense of
+    def convertZoneDump(self, theString):
+
+        returnItems = []
+
+        #every four characters
+        inputItems = re.findall('....',theString)
+        for inputItem in inputItems:
+            # Swap the couples of every four bytes (little endian to big endian)
+            swapedBytes = []
+            swapedBytes.insert(0,inputItem[0:2])
+            swapedBytes.insert(0,inputItem[2:4])
+
+            # add swapped set of four bytes to our return items, converting from hex to int
+            itemHexString = ''.join(swapedBytes)
+            itemInt = int(itemHexString, 16)
+
+            # each value is a timer for a zone that ticks down every five seconds from maxint
+            MAXINT = 65536
+            itemTicks = MAXINT - itemInt
+            itemSeconds = itemTicks * 5
+
+            itemLastClosed = self.humanTimeAgo(datetime.timedelta(seconds=itemSeconds))
+
+            if itemHexString == "FFFF":
+                itemLastClosed = "is currently Open"
+            if itemHexString == "0000":
+                itemLastClosed = "last Closed longer ago than I can remember"
+            else:
+                itemLastClosed = "last Closed " + itemLastClosed
+
+            returnItems.append(str(itemLastClosed))
+        return returnItems
+
+    #public domain from https://pypi.python.org/pypi/ago/0.0.6
+    def delta2dict( self, delta ):
+        delta = abs( delta )
+        return {
+            'year'   : int(delta.days / 365),
+            'day'    : int(delta.days % 365),
+            'hour'   : int(delta.seconds / 3600),
+            'minute' : int(delta.seconds / 60) % 60,
+            'second' : delta.seconds % 60,
+            'microsecond' : delta.microseconds
+        }
+
+    def humanTimeAgo(self, dt, precision=3, past_tense='{} ago', future_tense='in {}'):
+        """Accept a datetime or timedelta, return a human readable delta string"""
+        delta = dt
+        if type(dt) is not type(datetime.timedelta()):
+            delta = datetime.now() - dt
+
+        the_tense = past_tense
+        if delta < datetime.timedelta(0):
+            the_tense = future_tense
+
+        d = self.delta2dict( delta )
+        hlist = []
+        count = 0
+        units = ( 'year', 'day', 'hour', 'minute', 'second', 'microsecond' )
+        for unit in units:
+            if count >= precision: break # met precision
+            if d[ unit ] == 0: continue # skip 0's
+            s = '' if d[ unit ] == 1 else 's' # handle plurals
+            hlist.append( '%s %s%s' % ( d[unit], unit, s ) )
+            count += 1
+        human_delta = ', '.join( hlist )
+        return the_tense.format(human_delta)
 
     def ensure_init_alarmstate(self,partitionNumber):
         if not 'partition' in ALARMSTATE: ALARMSTATE['partition']={'lastevents' : []}
@@ -481,7 +559,11 @@ class AlarmServer(asyncore.dispatcher):
                 self._envisalinkclient.change_partition(int(changeTo))
                 channel.pushok(json.dumps({'response' : 'Request to change current partition to %s was received.' % changeTo}))
         elif query.path == '/api/testalarm':
-            self._envisalinkclient.handle_realtime_cid_event('1132010050');
+            self._envisalinkclient.handle_realtime_cid_event('1132010050')
+            channel.pushok('OK, boss')
+        elif query.path == '/api/testdump':
+            self._envisalinkclient.dump_zone_timers()
+            channel.pushok('OK, boss')
         elif query.path == '/api/config/eventtimeago':
             channel.pushok(json.dumps({'eventtimeago' : str(self._config.EVENTTIMEAGO)}))
         elif query.path == '/img/glyphicons-halflings.png':
