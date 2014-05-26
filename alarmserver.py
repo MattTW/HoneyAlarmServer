@@ -168,6 +168,33 @@ class EnvisalinkClient(asynchat.async_chat):
         self.close()
 
 
+    #application commands to the envisalink
+
+
+    def send_command(self, code, data):
+        to_send = '^'+code+','+data+'$'
+        self.send_data(to_send)
+
+    def poll(self):
+        if self._loggedin:
+            self.send_command('00','')
+            self._pollthread = threading.Timer(self._config.ENVISAPOLLINTERVAL, self.poll)
+            self._pollthread.start()
+
+    def change_partition(self,partitionNumber):
+        if partitionNumber < 1 or partitionNumber > 8:
+            logging.error("Invalid Partition Number %i specified when trying to change partition, ignoring.", partitionNumber)
+            return
+        if self._loggedin:
+            self.send_command('01', str(partitionNumber))
+
+    def dump_zone_timers(self):
+        if self._loggedin:
+            self.send_command('02','')
+
+
+    #network communication callbacks
+
     def do_connect(self, reconnect = False):
         # Create the socket and connect to the server
         if reconnect == True:
@@ -202,37 +229,6 @@ class EnvisalinkClient(asynchat.async_chat):
         logging.debug('TX > '+data)
         self.push(data)
 
-    #application commands to the envisalink
-    def send_command(self, code, data):
-        to_send = '^'+code+','+data+'$'
-        self.send_data(to_send)
-
-    def poll(self):
-        if self._loggedin:
-            self.send_command('00','')
-            self._pollthread = threading.Timer(self._config.ENVISAPOLLINTERVAL, self.poll)
-            self._pollthread.start()
-
-    def change_partition(self,partitionNumber):
-        if partitionNumber < 1 or partitionNumber > 8:
-            logging.error("Invalid Partition Number %i specified when trying to change partition, ignoring.", partitionNumber)
-            return
-        if self._loggedin:
-            self.send_command('01', str(partitionNumber))
-
-    def handle_poll_response(self,code):
-        self.checkCommandResponse(code)
-
-    def handle_change_partition_response(self,code):
-        self.checkCommandResponse(code)
-
-    def checkCommandResponse(self,code):
-        responseString = evl_TPI_Response_Codes[code]
-        logging.debug("received response from envisalink: " + responseString)
-        if code != '00':
-          logging.error("error sending command to envisalink.  Response was: " + responseString)
-
-
     def handle_line(self, input):
         if input != '':
 
@@ -265,7 +261,9 @@ class EnvisalinkClient(asynchat.async_chat):
             logging.debug('----------------------------------------')
 
 
-    #envisalink event handlers, some events are unhandled.
+
+    # Envisalink Response Handlers
+
     def handle_login(self, data):
         self.send_data(self._config.ENVISALINKPASS)
 
@@ -280,6 +278,12 @@ class EnvisalinkClient(asynchat.async_chat):
 
     def handle_login_timeout(self,data):
         logging.error('Envisalink timed out waiting for password, whoops that should never happen. Server is closing socket connection')
+
+    def handle_command_response(self,code):
+        responseString = evl_TPI_Response_Codes[code]
+        logging.debug("received response from envisalink: " + responseString)
+        if code != '00':
+          logging.error("error sending command to envisalink.  Response was: " + responseString)
 
     def handle_keypad_update(self,data):
         dataList = data.split(',')
