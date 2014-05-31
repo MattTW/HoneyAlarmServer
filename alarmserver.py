@@ -9,7 +9,6 @@
 
 import asyncore, asynchat
 import ConfigParser
-import datetime
 import os, socket, string, sys, httplib, urllib, urlparse, ssl
 import StringIO, mimetools
 import json
@@ -23,7 +22,8 @@ import struct, re
 from envisalinkdefs import *
 from plugins.basePlugin import BasePlugin
 from baseConfig import BaseConfig
-
+from datetime import datetime
+from datetime import timedelta
 
 ALARMSTATE={'version' : 0.1}
 MAXPARTITIONS=16
@@ -47,6 +47,8 @@ class AlarmServerConfig(BaseConfig):
         self.ENVISALINKPORT = self.read_config_var('envisalink', 'port', 4025, 'int')
         self.ENVISALINKPASS = self.read_config_var('envisalink', 'pass', 'user', 'str')
         self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval',60,'int')
+        self.ENVISAPOLLTIMEOUT = self.read_config_var('envisalink','polltimeout',3,'int')
+        self.ENVISAKEYPADTIMEOUT = self.read_config_var('envisalink','keypadtimeout',15,'int')
         self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
         self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
         self.LOGFILE = self.read_config_var('alarmserver', 'logfile', '', 'str')
@@ -107,7 +109,7 @@ class HTTPChannel(asynchat.async_chat):
         self.pushstatus(200, "OK")
         self.push('Content-type: application/json\r\n')
         self.push('Expires: Sat, 26 Jul 1997 05:00:00 GMT\r\n')
-        self.push('Last-Modified: '+ datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")+' GMT\r\n')
+        self.push('Last-Modified: '+ datetime.now().strftime("%d/%m/%Y %H:%M:%S")+' GMT\r\n')
         self.push('Cache-Control: no-store, no-cache, must-revalidate\r\n' )
         self.push('Cache-Control: post-check=0, pre-check=0\r\n')
         self.push('Pragma: no-cache\r\n' )
@@ -154,6 +156,11 @@ class EnvisalinkClient(asynchat.async_chat):
         # find plugins and load/config them
         self.plugins = []
 
+        self._lastkeypadupdate = datetime.now()
+        self._lastpoll = datetime.min
+        self._lastpollresponse = datetime.min
+
+
         pluginClasses = BasePlugin.find_subclasses("./plugins/")
         for plugin in pluginClasses:
             plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
@@ -161,12 +168,50 @@ class EnvisalinkClient(asynchat.async_chat):
 
         self.do_connect()
 
-    def cleanup(self):
+    def do_connect(self, reconnect = False):
+        # Create the socket and connect to the server
+        if reconnect:
+            logging.warning('Connection failed, retrying in '+str(self._retrydelay)+ ' seconds')
+            self._buffer = []
+            time.sleep(self._retrydelay)
+
+        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        self.connect((self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
+
+    def cleanup(self, reconnect = True):
         logging.debug("Cleaning up Envisalink client...")
-        if hasattr(self,'_pollthread'):
-            logging.debug("Stopping the polling thread...")
-            self._pollthread.cancel()
+        self._loggedin = False
         self.close()
+        if reconnect: self.do_connect(True)
+
+    def send_data(self,data):
+        logging.debug('TX > '+data)
+        self.push(data)
+
+    def check_alive(self):
+        if self._loggedin:
+            now = datetime.now()
+
+            #if a few seconds have passed since the last poll and we never received a response, something is wrong
+            delta = now - self._lastpoll
+            if self._lastpollresponse < self._lastpoll and delta > timedelta(seconds=self._config.ENVISAPOLLTIMEOUT):
+                logging.error("Timed out waiting for poll response, resetting connection...")
+                self.cleanup(True)
+                return
+
+            #is it time to poll again?
+            if delta > timedelta(seconds=self._config.ENVISAPOLLINTERVAL):
+              self._lastpoll = now
+              self.send_command('00','')
+
+            #if 10 seconds have passed and we haven't received a keypad update, something is wrong
+            delta = now - self._lastkeypadupdate
+            if delta > timedelta(seconds=self._config.ENVISAKEYPADTIMEOUT):
+                #reset connection
+                logging.error("No recent keypad updates from envisalink, resetting connection...")
+                self.cleanup(True)
+                return
 
 
     #application commands to the envisalink
@@ -175,12 +220,6 @@ class EnvisalinkClient(asynchat.async_chat):
     def send_command(self, code, data):
         to_send = '^'+code+','+data+'$'
         self.send_data(to_send)
-
-    def poll(self):
-        if self._loggedin:
-            self.send_command('00','')
-            self._pollthread = threading.Timer(self._config.ENVISAPOLLINTERVAL, self.poll)
-            self._pollthread.start()
 
     def change_partition(self,partitionNumber):
         if partitionNumber < 1 or partitionNumber > 8:
@@ -196,17 +235,6 @@ class EnvisalinkClient(asynchat.async_chat):
 
     #network communication callbacks
 
-    def do_connect(self, reconnect = False):
-        # Create the socket and connect to the server
-        if reconnect == True:
-            logging.warning('Connection failed, retrying in '+str(self._retrydelay)+ ' seconds')
-            self._buffer = []
-            for i in range(0, self._retrydelay):
-                time.sleep(1)
-
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        self.connect((self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
 
     def collect_incoming_data(self, data):
         # Append incoming data to the buffer
@@ -221,14 +249,8 @@ class EnvisalinkClient(asynchat.async_chat):
         logging.info("Connected to %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
 
     def handle_close(self):
-        self._loggedin = False
-        self.cleanup()
         logging.info("Disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
-        self.do_connect(True)
-
-    def send_data(self,data):
-        logging.debug('TX > '+data)
-        self.push(data)
+        self.cleanup(True)
 
     def handle_line(self, input):
         if input != '':
@@ -271,8 +293,6 @@ class EnvisalinkClient(asynchat.async_chat):
     def handle_login_success(self,data):
         self._loggedin = True
         logging.info('Password accepted, session created')
-        #periodically ping envisalink
-        self.poll()
 
     def handle_login_failure(self, data):
         logging.error('Password is incorrect. Server is closing socket connection.')
@@ -280,13 +300,18 @@ class EnvisalinkClient(asynchat.async_chat):
     def handle_login_timeout(self,data):
         logging.error('Envisalink timed out waiting for password, whoops that should never happen. Server is closing socket connection')
 
+    def handle_poll_response(self,code):
+        self._lastpollresponse = datetime.now()
+        self.handle_command_response(code)
+
     def handle_command_response(self,code):
         responseString = evl_TPI_Response_Codes[code]
-        logging.debug("received response from envisalink: " + responseString)
+        logging.debug("Envisalink response: " + responseString)
         if code != '00':
           logging.error("error sending command to envisalink.  Response was: " + responseString)
 
     def handle_keypad_update(self,data):
+        self._lastkeypadupdate = datetime.now()
         dataList = data.split(',')
         #make sure data is in format we expect, current TPI seems to send bad data every so ofen
         if len(dataList) !=5 or "%" in data:
@@ -418,7 +443,7 @@ class EnvisalinkClient(asynchat.async_chat):
             itemTicks = MAXINT - itemInt
             itemSeconds = itemTicks * 5
 
-            itemLastClosed = self.humanTimeAgo(datetime.timedelta(seconds=itemSeconds))
+            itemLastClosed = self.humanTimeAgo(timedelta(seconds=itemSeconds))
 
             if itemHexString == "FFFF":
                 itemLastClosed = "is currently Open"
@@ -445,11 +470,11 @@ class EnvisalinkClient(asynchat.async_chat):
     def humanTimeAgo(self, dt, precision=3, past_tense='{} ago', future_tense='in {}'):
         """Accept a datetime or timedelta, return a human readable delta string"""
         delta = dt
-        if type(dt) is not type(datetime.timedelta()):
+        if type(dt) is not type(timedelta()):
             delta = datetime.now() - dt
 
         the_tense = past_tense
-        if delta < datetime.timedelta(0):
+        if delta < timedelta(0):
             the_tense = future_tense
 
         d = self.delta2dict( delta )
@@ -510,7 +535,10 @@ class AlarmServer(asyncore.dispatcher):
     def cleanup(self):
         logging.debug("Cleaning up AlarmServer...")
         self.close()
-        self._envisalinkclient.cleanup()
+        self._envisalinkclient.cleanup(False)
+
+    def check_envisalink_alive(self):
+        self._envisalinkclient.check_alive()
 
     def handle_accept(self):
         # Accept the connection
@@ -636,6 +664,7 @@ if __name__=="__main__":
     try:
         while True:
             asyncore.loop(timeout=2, count=1)
+            server.check_envisalink_alive()
     except KeyboardInterrupt:
         print "Crtl+C pressed. Shutting down."
         logging.info('Shutting down from Ctrl+C')
