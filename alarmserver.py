@@ -47,7 +47,7 @@ class AlarmServerConfig(BaseConfig):
         self.ENVISALINKPORT = self.read_config_var('envisalink', 'port', 4025, 'int')
         self.ENVISALINKPASS = self.read_config_var('envisalink', 'pass', 'user', 'str')
         self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval',60,'int')
-        self.ENVISAPOLLTIMEOUT = self.read_config_var('envisalink','polltimeout',3,'int')
+        self.ENVISAPOLLTIMEOUT = self.read_config_var('envisalink','polltimeout',5,'int')
         self.ENVISAKEYPADTIMEOUT = self.read_config_var('envisalink','keypadtimeout',15,'int')
         self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
         self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
@@ -155,12 +155,6 @@ class EnvisalinkClient(asynchat.async_chat):
 
         # find plugins and load/config them
         self.plugins = []
-
-        self._lastkeypadupdate = datetime.now()
-        self._lastpoll = datetime.min
-        self._lastpollresponse = datetime.min
-
-
         pluginClasses = BasePlugin.find_subclasses("./plugins/")
         for plugin in pluginClasses:
             plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
@@ -169,6 +163,10 @@ class EnvisalinkClient(asynchat.async_chat):
         self.do_connect()
 
     def do_connect(self, reconnect = False):
+        now = datetime.now()
+        self._lastkeypadupdate = now
+        self._lastpoll = now
+        self._lastpollresponse = now
         # Create the socket and connect to the server
         if reconnect:
             logging.warning('Connection failed, retrying in '+str(self._retrydelay)+ ' seconds')
