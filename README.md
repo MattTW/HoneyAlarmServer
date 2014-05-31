@@ -11,14 +11,15 @@ This is still beta software.  So far it has only been tested with an Envisalink 
  + HTTP calls to get current AlarmState, change Partition, and to arm, disarm and armstay the alarm system are working.  Note that these calls are currently async, the response only acknowledges that the command was sent to Envisalink, not that it was sucessfully executed.
  + Events are triggered for most alarm arming and disarming conditions
  + The [Mac Launcher app](https://github.com/gschrader/Alarm-Server-Launcher) originally writted for the DSC version of the server works with this app.
- + "Dump Zone Timers" command is implemented but only prints debug statements for now
+ + "Dump Zone Timers" command is implemented but only prints debug statements for now, not added to AlarmState HTTP call yet.
+ + "Zone State Change" update sent by Envisalink is implemented but only prints debug statements for now, not added to AlarmState HTTP call yet.
 
 #### What Doesn't Work ####
 
 + The Web UI is not yet fully working.
-+ Zone state change messages from the TPI seem to currently be buggy and are only logged at this time.
++ Zone state change messages from the TPI seem to be buggy and work sporadically, if you aren't seeing them when you should try rebooting your envisalink
 + The Alarm state returned by the HTTP api call only returns partition state information so far (it does not return all the state expected by the Web UI)
-+ Make HTTP API commands synchronous so they can return success/failure or results
++ Make HTTP API commands synchronous so they can return success/failure or results instead of just acknowledging the command
 
 
 Plugin System

@@ -46,9 +46,9 @@ class AlarmServerConfig(BaseConfig):
         self.ENVISALINKHOST = self.read_config_var('envisalink', 'host', 'envisalink', 'str')
         self.ENVISALINKPORT = self.read_config_var('envisalink', 'port', 4025, 'int')
         self.ENVISALINKPASS = self.read_config_var('envisalink', 'pass', 'user', 'str')
-        self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval',60,'int')
-        self.ENVISAPOLLTIMEOUT = self.read_config_var('envisalink','polltimeout',5,'int')
-        self.ENVISAKEYPADTIMEOUT = self.read_config_var('envisalink','keypadtimeout',15,'int')
+        self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval',20,'int')
+        self.ENVISAPOLLTIMEOUT = self.read_config_var('envisalink','polltimeout',45,'int')
+        self.ENVISAKEYPADTIMEOUT = self.read_config_var('envisalink','keypadtimeout',20,'int')
         self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
         self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
         self.LOGFILE = self.read_config_var('alarmserver', 'logfile', '', 'str')
@@ -339,12 +339,38 @@ class EnvisalinkClient(asynchat.async_chat):
         if not self._has_partition_state_changed:
             ALARMSTATE['partition'][partitionNumber]['status'].update( {'armed' : bool(flags.armed_away or flags.armed_zero_entry_delay or flags.armed_stay)})
 
-        logging.debug(json.dumps(ALARMSTATE))
+        #logging.debug(json.dumps(ALARMSTATE))
 
 
     def handle_zone_state_change(self,data):
-        #Honeywell Panels or Envisalink currently does not seem to generate these events
-        logging.debug('zone state change handler not implemented yet')
+        #Envisalink TPI is inconsistent at generating these, seem to be created heuristically from keypad update fault messages
+
+        bigEndianHexString = ''
+        #every four characters
+        inputItems = re.findall('....',data)
+        for inputItem in inputItems:
+            # Swap the couples of every four bytes (little endian to big endian)
+            swapedBytes = []
+            swapedBytes.insert(0,inputItem[0:2])
+            swapedBytes.insert(0,inputItem[2:4])
+
+            # add swapped set of four bytes to our return items, converting from hex to int
+            bigEndianHexString += ''.join(swapedBytes)
+
+        # convert hex string to 64 bit bitstring
+        bitfieldString = str(bin(int(bigEndianHexString, 16))[2:].zfill(64))
+
+        # reverse every 16 bits so "lowest" zone is on the left
+        zonefieldString = ''
+        inputItems = re.findall('.'*16,bitfieldString)
+        for inputItem in inputItems:
+            zonefieldString += inputItem[::-1]
+
+        for zoneNumber,zoneBit in enumerate(zonefieldString,start=1):
+            zoneName = self._config.ZONENAMES[zoneNumber]
+            if zoneName:
+                logging.debug("%s (zone %i) is %s",zoneName,zoneNumber, "Open/Faulted" if zoneBit=='1' else "Closed/Not Faulted")
+
 
     def handle_partition_state_change(self,data):
         self._has_partition_state_changed = True
@@ -362,7 +388,7 @@ class EnvisalinkClient(asynchat.async_chat):
                                                                            'armed' : armed } )
 
                 logging.debug('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
-                logging.debug(json.dumps(ALARMSTATE))
+                #logging.debug(json.dumps(ALARMSTATE))
 
     def handle_realtime_cid_event(self,data):
         eventTypeInt = int(data[0])
