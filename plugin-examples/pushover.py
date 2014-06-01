@@ -38,7 +38,7 @@ class PushoverPlugin(BasePlugin):
         self.checkresponse(r)
 
     def alarmTriggered(self, alarmDescription, zone):
-        self._payload['message'] = "Security Alarm triggered at %s.  Description: %s" % (zone, alarmDescription)
+        self._payload['message'] = "Security Alarm triggered at %s. Description: %s" % (zone, alarmDescription)
         self._payload['priority'] = "2"
         self._payload['retry'] = "30"
         self._payload['expire'] = '86400'
@@ -49,7 +49,12 @@ class PushoverPlugin(BasePlugin):
         self.checkresponse(r)
 
     def alarmCleared(self, alarmDescription, zone):
-        self._payload['message'] = "Security Alarm cleared at %s.  Description: %s" % (zone, alarmDescription)
+        self._payload['message'] = "Security Alarm cleared at %s. Description: %s" % (zone, alarmDescription)
+        r = requests.post(self._urlbase, data=self._payload)
+        self.checkresponse(r)
+
+    def envisalinkUnresponsive(self, condition):
+        self._payload['message'] = "Envisalink became unresponse. %s" % condition
         r = requests.post(self._urlbase, data=self._payload)
         self.checkresponse(r)
 

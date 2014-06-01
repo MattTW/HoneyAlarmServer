@@ -41,34 +41,69 @@ class AlarmServerConfig(BaseConfig):
         # call ancestor for common setup
         super(self.__class__, self).__init__(configfile)
 
-        self.LOGURLREQUESTS = self.read_config_var('alarmserver', 'logurlrequests', True, 'bool')
-        self.HTTPSPORT = self.read_config_var('alarmserver', 'httpsport', 8111, 'int')
-        self.CERTFILE = self.read_config_var('alarmserver', 'certfile', 'server.crt', 'str')
-        self.KEYFILE = self.read_config_var('alarmserver', 'keyfile', 'server.key', 'str')
-        self.MAXEVENTS = self.read_config_var('alarmserver', 'maxevents', 10, 'int')
-        self.MAXALLEVENTS = self.read_config_var('alarmserver', 'maxallevents', 100, 'int')
-        self.ENVISALINKHOST = self.read_config_var('envisalink', 'host', 'envisalink', 'str')
-        self.ENVISALINKPORT = self.read_config_var('envisalink', 'port', 4025, 'int')
-        self.ENVISALINKPASS = self.read_config_var('envisalink', 'pass', 'user', 'str')
-        self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink','pollinterval',20,'int')
-        self.ENVISAPOLLTIMEOUT = self.read_config_var('envisalink','polltimeout',45,'int')
-        self.ENVISAKEYPADTIMEOUT = self.read_config_var('envisalink','keypadtimeout',20,'int')
-        self.ALARMCODE = self.read_config_var('envisalink', 'alarmcode', 1111, 'int')
-        self.EVENTTIMEAGO = self.read_config_var('alarmserver', 'eventtimeago', True, 'bool')
-        self.LOGFILE = self.read_config_var('alarmserver', 'logfile', '', 'str')
-        self.LOGLEVEL = self.read_config_var('alarmserver','loglevel','DEBUG','str')
+        self.LOGURLREQUESTS = self.read_config_var('alarmserver',
+                                                   'logurlrequests',
+                                                   True, 'bool')
+        self.HTTPSPORT = self.read_config_var('alarmserver',
+                                              'httpsport',
+                                              8111, 'int')
+        self.CERTFILE = self.read_config_var('alarmserver',
+                                             'certfile',
+                                             'server.crt', 'str')
+        self.KEYFILE = self.read_config_var('alarmserver',
+                                            'keyfile',
+                                            'server.key', 'str')
+        self.MAXEVENTS = self.read_config_var('alarmserver',
+                                              'maxevents',
+                                              10, 'int')
+        self.MAXALLEVENTS = self.read_config_var('alarmserver',
+                                                 'maxallevents',
+                                                 100, 'int')
+        self.ENVISALINKHOST = self.read_config_var('envisalink',
+                                                   'host',
+                                                   'envisalink', 'str')
+        self.ENVISALINKPORT = self.read_config_var('envisalink',
+                                                   'port',
+                                                   4025, 'int')
+        self.ENVISALINKPASS = self.read_config_var('envisalink',
+                                                   'pass',
+                                                   'user', 'str')
+        self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink',
+                                                       'pollinterval',
+                                                       300, 'int')
+        self.ENVISACOMMANDTIMEOUT = self.read_config_var('envisalink',
+                                                         'commandtimeout',
+                                                         30, 'int')
+        self.ENVISAKPEVENTTIMEOUT = self.read_config_var('envisalink',
+                                                         'kpeventtimeout',
+                                                         45, 'int')
+        self.ALARMCODE = self.read_config_var('envisalink',
+                                              'alarmcode',
+                                              1111, 'int')
+        self.LOGFILE = self.read_config_var('alarmserver',
+                                            'logfile',
+                                            '', 'str')
+        self.LOGLEVEL = self.read_config_var('alarmserver',
+                                             'loglevel',
+                                             'DEBUG', 'str')
 
         self.PARTITIONNAMES = {}
         for i in range(1, MAXPARTITIONS+1):
-            self.PARTITIONNAMES[i] = self.read_config_var('alarmserver', 'partition'+str(i), False, 'str', True)
+            self.PARTITIONNAMES[i] = self.read_config_var('alarmserver',
+                                                          'partition'+str(i),
+                                                          False, 'str', True)
 
         self.ZONENAMES = {}
         for i in range(1, MAXZONES+1):
-            self.ZONENAMES[i] = self.read_config_var('alarmserver', 'zone'+str(i), False, 'str', True)
+            self.ZONENAMES[i] = self.read_config_var('alarmserver',
+                                                     'zone'+str(i),
+                                                     False, 'str', True)
 
         self.ALARMUSERNAMES = {}
         for i in range(1, MAXALARMUSERS+1):
-            self.ALARMUSERNAMES[i] = self.read_config_var('alarmserver', 'user'+str(i), False, 'str', True)
+            self.ALARMUSERNAMES[i] = self.read_config_var('alarmserver',
+                                                          'user'+str(i),
+                                                          False, 'str', True)
 
 
 class HTTPChannel(asynchat.async_chat):
@@ -113,7 +148,8 @@ class HTTPChannel(asynchat.async_chat):
         self.pushstatus(200, "OK")
         self.push('Content-type: application/json\r\n')
         self.push('Expires: Sat, 26 Jul 1997 05:00:00 GMT\r\n')
-        self.push('Last-Modified: ' + datetime.now().strftime("%d/%m/%Y %H:%M:%S") + ' GMT\r\n')
+        self.push('Last-Modified: ' +
+                  datetime.now().strftime("%d/%m/%Y %H:%M:%S") + ' GMT\r\n')
         self.push('Cache-Control: no-store, no-cache, must-revalidate\r\n')
         self.push('Cache-Control: post-check=0, pre-check=0\r\n')
         self.push('Pragma: no-cache\r\n')
@@ -132,7 +168,8 @@ class HTTPChannel(asynchat.async_chat):
         elif extension == ".css":
             self.push("Content-type: text/css\r\n")
         self.push("\r\n")
-        self.push_with_producer(push_FileProducer(sys.path[0] + os.sep + 'ext' + os.sep + file))
+        self.push_with_producer(push_FileProducer(sys.path[0] + os.sep +
+                                                  'ext' + os.sep + file))
 
 
 class EnvisalinkClient(asynchat.async_chat):
@@ -157,6 +194,9 @@ class EnvisalinkClient(asynchat.async_chat):
         # Reconnect delay
         self._retrydelay = 10
 
+        # is there a command to the envisalink pending
+        self._commandinprogress = False
+
         # find plugins and load/config them
         self.plugins = []
         pluginClasses = BasePlugin.find_subclasses("./plugins/")
@@ -170,10 +210,12 @@ class EnvisalinkClient(asynchat.async_chat):
         now = datetime.now()
         self._lastkeypadupdate = now
         self._lastpoll = now
-        self._lastpollresponse = now
+        self._lastcommand = now
+        self._lastcommandresponse = now
         # Create the socket and connect to the server
         if reconnect:
-            logging.warning('Connection failed, retrying in '+str(self._retrydelay) + ' seconds')
+            logging.warning('Connection failed, retrying in ' +
+                            str(self._retrydelay) + ' seconds')
             self._buffer = []
             time.sleep(self._retrydelay)
 
@@ -196,11 +238,14 @@ class EnvisalinkClient(asynchat.async_chat):
         if self._loggedin:
             now = datetime.now()
 
-            # if a few seconds have passed since the last poll and we never
-            # received a response, something is wrong
-            delta = now - self._lastpoll
-            if self._lastpollresponse < self._lastpoll and delta > timedelta(seconds=self._config.ENVISAPOLLTIMEOUT):
-                logging.error("Timed out waiting for poll response, resetting connection...")
+            # if too much time has passed since command was sent without a
+            # response, something is wrong
+            delta = now - self._lastcommand
+            if self._lastcommandresponse < self._lastcommand and delta > timedelta(seconds=self._config.ENVISACOMMANDTIMEOUT):
+                message = "Timed out waiting for command response, resetting connection..."
+                logging.error(message)
+                for plugin in self.plugins:
+                    plugin.envisalinkUnresponsive(message)
                 self.cleanup(True)
                 return
 
@@ -212,9 +257,12 @@ class EnvisalinkClient(asynchat.async_chat):
             # if 10 seconds have passed and we haven't received a keypad update,
             # something is wrong
             delta = now - self._lastkeypadupdate
-            if delta > timedelta(seconds=self._config.ENVISAKEYPADTIMEOUT):
+            if delta > timedelta(seconds=self._config.ENVISAKPEVENTTIMEOUT):
                 # reset connection
-                logging.error("No recent keypad updates from envisalink, resetting connection...")
+                message = "No recent keypad updates from envisalink, resetting connection..."
+                logging.error(message)
+                for plugin in self.plugins:
+                    plugin.envisalinkUnresponsive(message)
                 self.cleanup(True)
                 return
 
@@ -222,6 +270,11 @@ class EnvisalinkClient(asynchat.async_chat):
     # application commands to the envisalink
 
     def send_command(self, code, data):
+        if self._commandinprogress:
+            logging.error("Command already in progress - ignoring last command")
+            return
+        self._commandinprogress = True
+        self._lastcommand = datetime.now()
         to_send = '^'+code+','+data+'$'
         self.send_data(to_send)
 
@@ -306,6 +359,8 @@ class EnvisalinkClient(asynchat.async_chat):
         self.handle_command_response(code)
 
     def handle_command_response(self, code):
+        self._commandinprogress = False
+        self._lastcommandresponse = datetime.now()
         responseString = evl_TPI_Response_Codes[code]
         logging.debug("Envisalink response: " + responseString)
         if code != '00':

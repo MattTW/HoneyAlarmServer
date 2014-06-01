@@ -80,6 +80,6 @@ class sssPlugin(BasePlugin):
 
     def checkResponse(self, response, action):
         if not response.json()['success']:
-            logging.error("Unsuccessful %s to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (action, response.url, response.status_code, response.json()))
+            logging.error("Unsuccessful %s to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (action, response.url, response.status_code, sresponse.json()))
             return False
         return True
