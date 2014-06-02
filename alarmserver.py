@@ -207,6 +207,7 @@ class EnvisalinkClient(asynchat.async_chat):
         self.do_connect()
 
     def do_connect(self, reconnect=False):
+        self._commandinprogress = False
         now = datetime.now()
         self._lastkeypadupdate = now
         self._lastpoll = now
