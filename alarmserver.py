@@ -7,22 +7,24 @@
 #
 # This code is under the terms of the GPL v3 license.
 
-
-import asyncore
-import asynchat
 import os
-import socket
-import string
+import signal
 import sys
-import urlparse
-import ssl
-import StringIO
-import mimetools
 import json
 import time
 import getopt
 import logging
 import re
+import urlparse
+
+from twisted.internet import reactor
+from twisted.web.resource import Resource, NoResource
+from twisted.web.server import Site
+from twisted.web.static import File
+from twisted.protocols.basic import LineOnlyReceiver
+from twisted.internet.protocol import Factory
+from twisted.internet.endpoints import TCP4ClientEndpoint
+from twisted.python import log
 
 from envisalinkdefs import *
 from plugins.basePlugin import BasePlugin
@@ -106,96 +108,36 @@ class AlarmServerConfig(BaseConfig):
                                                           False, 'str', True)
 
 
-class HTTPChannel(asynchat.async_chat):
-    def __init__(self, server, sock, addr):
-        asynchat.async_chat.__init__(self, sock)
-        self.server = server
-        self.set_terminator("\r\n\r\n")
-        self.header = None
-        self.data = ""
-        self.shutdown = 0
+class EnvisalinkClientFactory(Factory):
+    singleton = None
 
-    def collect_incoming_data(self, data):
-        self.data = self.data + data
-        if len(self.data) > 16384:
-            # limit the header size to prevent attacks
-            self.shutdown = 1
+    @classmethod
+    def setSingleton(cls, e):
+        cls.singleton = e
 
-    def found_terminator(self):
-        if not self.header:
-            # parse http header
-            fp = StringIO.StringIO(self.data)
-            request = string.split(fp.readline(), None, 2)
-            if len(request) != 3:
-                # badly formed request; just shut down
-                self.shutdown = 1
-            else:
-                # parse message header
-                self.header = mimetools.Message(fp)
-                self.set_terminator("\r\n")
-                self.server.handle_request(
-                    self, request[0], request[1], self.header
-                    )
-                self.close_when_done()
-            self.data = ""
-        else:
-            pass  # ignore body data, for now
-
-    def pushstatus(self, status, explanation="OK"):
-        self.push("HTTP/1.0 %d %s\r\n" % (status, explanation))
-
-    def pushok(self, content):
-        self.pushstatus(200, "OK")
-        self.push('Content-type: application/json\r\n')
-        self.push('Expires: Sat, 26 Jul 1997 05:00:00 GMT\r\n')
-        self.push('Last-Modified: ' +
-                  datetime.now().strftime("%d/%m/%Y %H:%M:%S") + ' GMT\r\n')
-        self.push('Cache-Control: no-store, no-cache, must-revalidate\r\n')
-        self.push('Cache-Control: post-check=0, pre-check=0\r\n')
-        self.push('Pragma: no-cache\r\n')
-        self.push('\r\n')
-        self.push(content)
-
-    def pushfile(self, file):
-        self.pushstatus(200, "OK")
-        extension = os.path.splitext(file)[1]
-        if extension == ".html":
-            self.push("Content-type: text/html\r\n")
-        elif extension == ".js":
-            self.push("Content-type: text/javascript\r\n")
-        elif extension == ".png":
-            self.push("Content-type: image/png\r\n")
-        elif extension == ".css":
-            self.push("Content-type: text/css\r\n")
-        self.push("\r\n")
-        self.push_with_producer(push_FileProducer(sys.path[0] + os.sep +
-                                                  'ext' + os.sep + file))
+    def buildProtocol(self, addr):
+        return EnvisalinkClientFactory.singleton
 
 
-class EnvisalinkClient(asynchat.async_chat):
+class EnvisalinkClient(LineOnlyReceiver):
     def __init__(self, config):
-        # Call parent class's __init__ method
-        asynchat.async_chat.__init__(self)
-
-        # Define some private instance variables
-        self._buffer = []
-
         # Are we logged in?
         self._loggedin = False
 
         self._has_partition_state_changed = False
 
-        # Set our terminator to \n
-        self.set_terminator("\r\n")
-
         # Set config
         self._config = config
 
         # Reconnect delay
-        self._retrydelay = 10
+        self._reconnectdelay = 10
 
         # is there a command to the envisalink pending
         self._commandinprogress = False
+
+        self._shuttingdown = False
+
+        reactor.addSystemEventTrigger('before','shutdown',self.shutdownEvent)
 
         # find plugins and load/config them
         self.plugins = []
@@ -205,6 +147,11 @@ class EnvisalinkClient(asynchat.async_chat):
             self.plugins.append(plugin(plugincfg))
 
         self.do_connect()
+
+    def shutdownEvent(self):
+        self._shuttingdown = True
+        logging.info("Twisted reactor is shutting down...")
+        self.cleanup(False)
 
     def do_connect(self, reconnect=False):
         self._commandinprogress = False
@@ -216,24 +163,27 @@ class EnvisalinkClient(asynchat.async_chat):
         # Create the socket and connect to the server
         if reconnect:
             logging.warning('Connection failed, retrying in ' +
-                            str(self._retrydelay) + ' seconds')
+                            str(self._reconnectdelay) + ' seconds')
             self._buffer = []
-            time.sleep(self._retrydelay)
+            time.sleep(self._reconnectdelay)
 
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        point = TCP4ClientEndpoint(reactor, self._config.ENVISALINKHOST, self._config.ENVISALINKPORT)
+        d = point.connect(EnvisalinkClientFactory())
+        d.addCallback(self.gotProtocol)
 
-        self.connect((self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
+    def gotProtocol(self, p):
+        logging.debug("Got Protocol for Envisalink...")
 
     def cleanup(self, reconnect=True):
         logging.debug("Cleaning up Envisalink client...")
         self._loggedin = False
-        self.close()
+        self.transport.loseConnection()
         if reconnect:
             self.do_connect(True)
 
     def send_data(self, data):
         logging.debug('TX > '+data)
-        self.push(data)
+        self.sendLine(data)
 
     def check_alive(self):
         if self._loggedin:
@@ -292,24 +242,15 @@ class EnvisalinkClient(asynchat.async_chat):
 
 
     # network communication callbacks
-
-    def collect_incoming_data(self, data):
-        # Append incoming data to the buffer
-        self._buffer.append(data)
-
-    def found_terminator(self):
-        line = "".join(self._buffer)
-        self.handle_line(line)
-        self._buffer = []
-
-    def handle_connect(self):
+    def connectionMade(self):
         logging.info("Connected to %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
 
-    def handle_close(self):
-        logging.info("Disconnected from %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
-        self.cleanup(True)
+    def connectionLost(self, reason):
+        logging.info("Disconnected from %s:%i, reason was %s" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, reason))
+        if not self._shuttingdown:
+            self.cleanup(True)
 
-    def handle_line(self, input):
+    def lineReceived(self, input):
         if input != '':
 
             logging.debug('----------------------------------------')
@@ -582,126 +523,76 @@ class EnvisalinkClient(asynchat.async_chat):
         if 'status' not in ALARMSTATE['partition'][partitionNumber]: ALARMSTATE['partition'][partitionNumber]['status'] = {}
 
 
-class push_FileProducer:
-    # a producer which reads data from a file object
-
-    def __init__(self, file):
-        self.file = open(file, "rb")
-
-    def more(self):
-        if self.file:
-            data = self.file.read(2048)
-            if data:
-                return data
-            self.file = None
-        return ""
-
-
-class AlarmServer(asyncore.dispatcher):
+class AlarmServer(Resource):
     def __init__(self, config):
-        # Call parent class's __init__ method
-        asyncore.dispatcher.__init__(self)
+        Resource.__init__(self)
 
-        # Create Envisalink client object
+        # Create Envisalink client connection
         self._envisalinkclient = EnvisalinkClient(config)
+        EnvisalinkClientFactory.setSingleton(self._envisalinkclient)   # for twisted
 
         # Store config
         self._config = config
 
-        # Create socket and listen on it
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.bind(("", config.HTTPSPORT))
-        self.listen(5)
-        logging.info("AlarmServer listening at %s:%i", socket.gethostbyname(socket.gethostname()), config.HTTPSPORT)
+        root = Resource()
+        rootFilePath = sys.path[0] + os.sep + 'ext'
+        root.putChild('app', File(rootFilePath))
+        root.putChild('api', self)
+        factory = Site(root)
+        reactor.listenTCP(config.HTTPSPORT, factory)
 
     def cleanup(self):
+        self._envisalinkclient.cleanup(False)
         logging.debug("Cleaning up AlarmServer...")
         self.close()
-        self._envisalinkclient.cleanup(False)
 
     def check_envisalink_alive(self):
         self._envisalinkclient.check_alive()
 
-    def handle_accept(self):
-        # Accept the connection
-        conn, addr = self.accept()
-        if (config.LOGURLREQUESTS):
-            logging.info('Incoming web connection from %s' % repr(addr))
+    def getChild(self, name, request):
+        return self
 
-        try:
-            HTTPChannel(self, ssl.wrap_socket(conn, server_side=True, certfile=config.CERTFILE, keyfile=config.KEYFILE, ssl_version=ssl.PROTOCOL_TLSv1), addr)
-        except ssl.SSLError as e:
-            logging.error("SSL error({0}): {1}".format(e.errno, e.strerror))
-            return
-
-    def handle_close(self):
-        self.cleanup()
-
-    def handle_request(self, channel, method, request, header):
-        if (config.LOGURLREQUESTS):
-            logging.info('Web request: '+str(method)+' '+str(request))
-
-        query = urlparse.urlparse(request)
+    def render_GET(self, request):
+        logging.debug(request.uri)
+        query = urlparse.urlparse(request.uri)
+        logging.debug(query)
         query_array = urlparse.parse_qs(query.query, True)
         if 'alarmcode' in query_array:
             alarmcode = str(query_array['alarmcode'][0])
         else:
             alarmcode = str(self._config.ALARMCODE)
 
-        if query.path == '/':
-            channel.pushfile('index.html')
-        elif query.path == '/api':
-            channel.pushok(json.dumps(ALARMSTATE))
-        elif query.path == '/api/alarm/arm':
+        myPath = query.path
+        if myPath[-1] == "/":
+            myPath = myPath[:-1]
+        if myPath == '/api':
+            return json.dumps(ALARMSTATE)
+        elif myPath == '/api/alarm/arm':
             self._envisalinkclient.send_data(alarmcode+'2')
-            channel.pushok(json.dumps({'response': 'Arm command sent to Envisalink.'}))
-        elif query.path == '/api/alarm/stayarm':
+            return json.dumps({'response': 'Arm command sent to Envisalink.'})
+        elif myPath == '/api/alarm/stayarm':
             self._envisalinkclient.send_data(alarmcode+'3')
-            channel.pushok(json.dumps({'response': 'Arm Home command sent to Envisalink.'}))
-        elif query.path == '/api/alarm/disarm':
+            return json.dumps({'response': 'Arm Home command sent to Envisalink.'})
+        elif myPath == '/api/alarm/disarm':
             self._envisalinkclient.send_data(alarmcode+'1')
-            channel.pushok(json.dumps({'response': 'Disarm command sent to Envisalink.'}))
-        elif query.path == '/api/partition':
+            return json.dumps({'response': 'Disarm command sent to Envisalink.'})
+        elif myPath == '/api/partition':
             changeTo = query_array['changeto'][0]
             if not changeTo.isdigit():
-                channel.pushok(json.dumps({'response': 'changeTo parameter was missing or not a number, ignored.'}))
+                return json.dumps({'response': 'changeTo parameter was missing or not a number, ignored.'})
             else:
                 self._envisalinkclient.change_partition(int(changeTo))
-                channel.pushok(json.dumps({'response': 'Request to change current partition to %s was received.' % changeTo}))
-        elif query.path == '/api/testalarm':
+                return json.dumps({'response': 'Request to change current partition to %s was received.' % changeTo})
+        elif myPath == '/api/testalarm':
             self._envisalinkclient.handle_realtime_cid_event('1132010050')
-            channel.pushok('OK, boss')
-        elif query.path == '/api/testdump':
+            return 'OK, boss'
+        elif myPath == '/api/testdump':
             self._envisalinkclient.dump_zone_timers()
-            channel.pushok('OK, boss')
-        elif query.path == '/api/config/eventtimeago':
-            channel.pushok(json.dumps({'eventtimeago': str(self._config.EVENTTIMEAGO)}))
-        elif query.path == '/img/glyphicons-halflings.png':
-            channel.pushfile('glyphicons-halflings.png')
-        elif query.path == '/img/glyphicons-halflings-white.png':
-            channel.pushfile('glyphicons-halflings-white.png')
-        elif query.path == '/favicon.ico':
-            channel.pushfile('favicon.ico')
+            return 'OK, boss'
+        elif myPath == '/api/config/eventtimeago':
+            return json.dumps({'eventtimeago': str(self._config.EVENTTIMEAGO)})
         else:
-            if len(query.path.split('/')) == 2:
-                try:
-                    with open(sys.path[0] + os.sep + 'ext' + os.sep + query.path.split('/')[1]) as f:
-                        f.close()
-                        channel.pushfile(query.path.split('/')[1])
-                except IOError as e:
-                    logging.error("I/O error({0}): {1}".format(e.errno, e.strerror))
-                    channel.pushstatus(404, "Not found")
-                    channel.push("Content-type: text/html\r\n")
-                    channel.push("File not found")
-                    channel.push("\r\n")
-            else:
-                if (config.LOGURLREQUESTS):
-                    logging.info("Invalid file requested")
-
-                channel.pushstatus(404, "Not found")
-                channel.push("Content-type: text/html\r\n")
-                channel.push("\r\n")
+            return NoResource().render(request)
 
 
 def usage():
@@ -740,12 +631,12 @@ if __name__ == "__main__":
     logging.info('Currently Supporting Envisalink 2DS/3 only')
     logging.info('Tested on a Honeywell Vista 15p + EVL-3')
 
+    observer = log.PythonLoggingObserver()
+    observer.start()
     server = AlarmServer(config)
 
     try:
-        while True:
-            asyncore.loop(timeout=2, count=1)
-            server.check_envisalink_alive()
+        reactor.run()
     except KeyboardInterrupt:
         print "Crtl+C pressed. Shutting down."
         logging.info('Shutting down from Ctrl+C')

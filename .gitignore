@@ -9,3 +9,4 @@ pushoverPlugin.cfg
 plugins/*
 !plugins/__init__.py
 !plugins/basePlugin.py
+todo
