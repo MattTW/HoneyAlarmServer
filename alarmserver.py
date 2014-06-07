@@ -591,8 +591,6 @@ class AlarmServer(Resource):
         elif myPath == '/api/testdump':
             self._envisalinkclient.dump_zone_timers()
             return 'OK, boss'
-        elif myPath == '/api/config/eventtimeago':
-            return json.dumps({'eventtimeago': str(self._config.EVENTTIMEAGO)})
         else:
             return NoResource().render(request)
 
