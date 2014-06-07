@@ -563,6 +563,7 @@ class AlarmServer(Resource):
         else:
             alarmcode = str(self._config.ALARMCODE)
 
+        request.setHeader('content-type', 'application/json')
         myPath = query.path
         if myPath[-1] == "/":
             myPath = myPath[:-1]
