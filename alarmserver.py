@@ -17,7 +17,7 @@ import logging
 import re
 import urlparse
 
-from twisted.internet import reactor
+from twisted.internet import ssl,reactor
 from twisted.web.resource import Resource, NoResource
 from twisted.web.server import Site
 from twisted.web.static import File
@@ -539,7 +539,8 @@ class AlarmServer(Resource):
         root.putChild('app', File(rootFilePath))
         root.putChild('api', self)
         factory = Site(root)
-        reactor.listenTCP(config.HTTPSPORT, factory)
+        reactor.listenSSL(config.HTTPSPORT, factory,
+                          ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
 
     def cleanup(self):
         self._envisalinkclient.cleanup(False)
