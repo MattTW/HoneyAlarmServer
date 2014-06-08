@@ -8,7 +8,6 @@
 # This code is under the terms of the GPL v3 license.
 
 import os
-import signal
 import sys
 import json
 import time
@@ -17,11 +16,12 @@ import logging
 import re
 import urlparse
 
-from twisted.internet import ssl,reactor
+from twisted.internet import ssl, reactor
 from twisted.web.resource import Resource, NoResource
 from twisted.web.server import Site
 from twisted.web.static import File
 from twisted.protocols.basic import LineOnlyReceiver
+from twisted.internet.task import LoopingCall
 from twisted.internet.protocol import Factory
 from twisted.internet.endpoints import TCP4ClientEndpoint
 from twisted.python import log
@@ -73,6 +73,9 @@ class AlarmServerConfig(BaseConfig):
         self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink',
                                                        'pollinterval',
                                                        300, 'int')
+        self.ENVISAZONEDUMPINTERVAL = self.read_config_var('envisalink',
+                                                           'zonedumpinterval',
+                                                           60, 'int')
         self.ENVISACOMMANDTIMEOUT = self.read_config_var('envisalink',
                                                          'commandtimeout',
                                                          30, 'int')
@@ -90,21 +93,21 @@ class AlarmServerConfig(BaseConfig):
                                              'DEBUG', 'str')
 
         self.PARTITIONNAMES = {}
-        for i in range(1, MAXPARTITIONS+1):
+        for i in range(1, MAXPARTITIONS + 1):
             self.PARTITIONNAMES[i] = self.read_config_var('alarmserver',
-                                                          'partition'+str(i),
+                                                          'partition' + str(i),
                                                           False, 'str', True)
 
         self.ZONENAMES = {}
-        for i in range(1, MAXZONES+1):
+        for i in range(1, MAXZONES + 1):
             self.ZONENAMES[i] = self.read_config_var('alarmserver',
-                                                     'zone'+str(i),
+                                                     'zone' + str(i),
                                                      False, 'str', True)
 
         self.ALARMUSERNAMES = {}
-        for i in range(1, MAXALARMUSERS+1):
+        for i in range(1, MAXALARMUSERS + 1):
             self.ALARMUSERNAMES[i] = self.read_config_var('alarmserver',
-                                                          'user'+str(i),
+                                                          'user' + str(i),
                                                           False, 'str', True)
 
 
@@ -137,7 +140,7 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         self._shuttingdown = False
 
-        reactor.addSystemEventTrigger('before','shutdown',self.shutdownEvent)
+        reactor.addSystemEventTrigger('before', 'shutdown', self.shutdownEvent)
 
         # find plugins and load/config them
         self.plugins = []
@@ -158,6 +161,7 @@ class EnvisalinkClient(LineOnlyReceiver):
         now = datetime.now()
         self._lastkeypadupdate = now
         self._lastpoll = now
+        self._lastzonedump = now
         self._lastcommand = now
         self._lastcommandresponse = now
         # Create the socket and connect to the server
@@ -182,7 +186,7 @@ class EnvisalinkClient(LineOnlyReceiver):
             self.do_connect(True)
 
     def send_data(self, data):
-        logging.debug('TX > '+data)
+        logging.debug('TX > ' + data)
         self.sendLine(data)
 
     def check_alive(self):
@@ -201,9 +205,16 @@ class EnvisalinkClient(LineOnlyReceiver):
                 return
 
             # is it time to poll again?
-            if delta > timedelta(seconds=self._config.ENVISAPOLLINTERVAL):
+            delta = now - self._lastpoll
+            if delta > timedelta(seconds=self._config.ENVISAPOLLINTERVAL) and not self._commandinprogress:
                 self._lastpoll = now
                 self.send_command('00', '')
+
+            # is it time to dump zone states again?
+            delta = now - self._lastzonedump
+            if delta > timedelta(seconds=self._config.ENVISAZONEDUMPINTERVAL) and not self._commandinprogress:
+                self._lastzonedump = now
+                self.dump_zone_timers()
 
             # if 10 seconds have passed and we haven't received a keypad update,
             # something is wrong
@@ -218,7 +229,7 @@ class EnvisalinkClient(LineOnlyReceiver):
                 return
 
 
-    # application commands to the envisalink
+# application commands to the envisalink
 
     def send_command(self, code, data):
         if self._commandinprogress:
@@ -226,7 +237,7 @@ class EnvisalinkClient(LineOnlyReceiver):
             return
         self._commandinprogress = True
         self._lastcommand = datetime.now()
-        to_send = '^'+code+','+data+'$'
+        to_send = '^' + code + ',' + data + '$'
         self.send_data(to_send)
 
     def change_partition(self, partitionNumber):
@@ -240,13 +251,13 @@ class EnvisalinkClient(LineOnlyReceiver):
         if self._loggedin:
             self.send_command('02', '')
 
-
     # network communication callbacks
+
     def connectionMade(self):
         logging.info("Connected to %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
 
     def connectionLost(self, reason):
-        logging.info("Disconnected from %s:%i, reason was %s" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, reason))
+        logging.info("Disconnected from %s:%i, reason was %s" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, reason.getErrorMessage()))
         if not self._shuttingdown:
             self.cleanup(True)
 
@@ -269,7 +280,7 @@ class EnvisalinkClient(LineOnlyReceiver):
             try:
                 handler = "handle_%s" % evl_ResponseTypes[code]['handler']
             except KeyError:
-                logging.warning('No handler defined for '+code+', skipping...')
+                logging.warning('No handler defined for ' + code + ', skipping...')
                 return
 
             try:
@@ -279,7 +290,6 @@ class EnvisalinkClient(LineOnlyReceiver):
 
             handlerFunc(data)
             logging.debug('----------------------------------------')
-
 
     # Envisalink Response Handlers
 
@@ -308,6 +318,32 @@ class EnvisalinkClient(LineOnlyReceiver):
         if code != '00':
             logging.error("error sending command to envisalink.  Response was: " + responseString)
 
+    # this is pretty hackish, refactor or redo it eventually when the ALARMSTATE format feels finalized
+    def ensure_init_alarmstate(self, zoneOrPartitionType, zoneOrPartitionNumber):
+        if 'arm' not in ALARMSTATE: ALARMSTATE.update({'arm': False, 'disarm': False, 'cancel': False})
+        if zoneOrPartitionType not in {'zone', 'partition'}: return
+        if zoneOrPartitionType == 'zone':
+            nameMap = self._config.ZONENAMES
+            defaultstatus = {'open': False, 'fault': False, 'alarm': False, 'tamper': False}
+        else:
+            nameMap = self._config.PARTITIONNAMES
+            defaultstatus = {'alarm': False, 'alarm_in_memory': False, 'armed_away': False,
+                             'ac_present': False, 'armed_bypass': False, 'chime': False,
+                             'armed_zero_entry_delay': False, 'alarm_fire_zone': False,
+                             'trouble': False, 'ready': False, 'fire': False,
+                             'armed_stay': False, 'alpha': False, 'beep': False}
+
+        if zoneOrPartitionType not in ALARMSTATE: ALARMSTATE[zoneOrPartitionType] = {'lastevents': []}
+        if zoneOrPartitionNumber in nameMap:
+            if zoneOrPartitionNumber not in ALARMSTATE[zoneOrPartitionType]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber] = {'name': nameMap[zoneOrPartitionNumber]}
+        else:
+            if zoneOrPartitionNumber not in ALARMSTATE[zoneOrPartitionType]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber] = {}
+        if 'lastevents' not in ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['lastevents'] = []
+        if 'status' not in ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]:
+            ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['status'] = {}
+            ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['status'].update(defaultstatus)
+        if 'lastfault' not in ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['lastfault'] = 'Last Closed longer ago than I can remember'
+
     def handle_keypad_update(self, data):
         self._lastkeypadupdate = datetime.now()
         dataList = data.split(',')
@@ -323,14 +359,14 @@ class EnvisalinkClient(LineOnlyReceiver):
         beep = evl_Virtual_Keypad_How_To_Beep.get(dataList[3], 'unknown')
         alpha = dataList[4]
 
-        self.ensure_init_alarmstate(partitionNumber)
-        ALARMSTATE['partition'][partitionNumber]['status'].update( {'alarm' : bool(flags.alarm), 'alarm_in_memory' : bool(flags.alarm_in_memory), 'armed_away' : bool(flags.armed_away),
-                                                        'ac_present' : bool(flags.ac_present), 'armed_bypass' : bool(flags.bypass), 'chime' : bool(flags.chime),
-                                                        'armed_zero_entry_delay' : bool(flags.armed_zero_entry_delay), 'alarm_fire_zone' : bool(flags.alarm_fire_zone),
-                                                        'trouble' : bool(flags.system_trouble), 'ready' : bool(flags.ready), 'fire' : bool(flags.fire),
-                                                        'armed_stay' : bool(flags.armed_stay),
-                                                        'alpha' : alpha,
-                                                        'beep' : beep,
+        self.ensure_init_alarmstate("partition", partitionNumber)
+        ALARMSTATE['partition'][partitionNumber]['status'].update({'alarm': bool(flags.alarm), 'alarm_in_memory': bool(flags.alarm_in_memory), 'armed_away': bool(flags.armed_away),
+                                                        'ac_present': bool(flags.ac_present), 'armed_bypass': bool(flags.bypass), 'chime': bool(flags.chime),
+                                                        'armed_zero_entry_delay': bool(flags.armed_zero_entry_delay), 'alarm_fire_zone': bool(flags.alarm_fire_zone),
+                                                        'trouble': bool(flags.system_trouble), 'ready': bool(flags.ready), 'fire': bool(flags.fire),
+                                                        'armed_stay': bool(flags.armed_stay),
+                                                        'alpha': alpha,
+                                                        'beep': beep,
                                                         })
 
         # if we have never yet received a partition state changed event,  we
@@ -338,8 +374,11 @@ class EnvisalinkClient(LineOnlyReceiver):
         # it here because we can't also figure out if we are in entry/exit
         # delay from here
         if not self._has_partition_state_changed:
-            ALARMSTATE['partition'][partitionNumber]['status'].update({'armed': bool(flags.armed_away or flags.armed_zero_entry_delay or flags.armed_stay)})
-        #logging.debug(json.dumps(ALARMSTATE))
+            armed = bool(flags.armed_away or flags.armed_zero_entry_delay or flags.armed_stay)
+            ALARMSTATE.update({'arm': not armed, 'disarm': armed})
+            ALARMSTATE['partition'][partitionNumber]['status'].update({'armed': armed})
+
+        logging.debug(json.dumps(ALARMSTATE))
 
     def handle_zone_state_change(self, data):
         # Envisalink TPI is inconsistent at generating these
@@ -362,32 +401,37 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         # reverse every 16 bits so "lowest" zone is on the left
         zonefieldString = ''
-        inputItems = re.findall('.'*16, bitfieldString)
+        inputItems = re.findall('.' * 16, bitfieldString)
         for inputItem in inputItems:
             zonefieldString += inputItem[::-1]
 
         for zoneNumber, zoneBit in enumerate(zonefieldString, start=1):
             zoneName = self._config.ZONENAMES[zoneNumber]
-            if zoneName:
+            if zoneName:    # defined in config with name (i.e. we care about it?)
+                self.ensure_init_alarmstate('zone', zoneNumber)
+                ALARMSTATE['zone'][zoneNumber]['status'].update({'open': zoneBit == '1', 'fault': zoneBit == '1'})
                 logging.debug("%s (zone %i) is %s", zoneName, zoneNumber, "Open/Faulted" if zoneBit == '1' else "Closed/Not Faulted")
 
-    def handle_partition_state_change(self,data):
+    def handle_partition_state_change(self, data):
         self._has_partition_state_changed = True
         for currentIndex in range(0, 8):
-            partitionStateCode = data[currentIndex*2:(currentIndex*2)+2]
+            partitionStateCode = data[currentIndex * 2:(currentIndex * 2) + 2]
             partitionState = evl_Partition_Status_Codes[str(partitionStateCode)]
             if partitionState['name'] != 'NOT_USED':
                 partitionNumber = currentIndex + 1
                 # TODO can we use dict.setdefault or defaultdict here instead?
-                self.ensure_init_alarmstate(partitionNumber)
+                self.ensure_init_alarmstate("partition", partitionNumber)
                 previouslyArmed = ALARMSTATE['partition'][partitionNumber]['status'].get('armed', False)
                 armed = partitionState['name'] in ('ARMED_STAY', 'ARMED_AWAY', 'ARMED_MAX')
+                ALARMSTATE.update({'arm': not armed, 'disarm': armed, 'cancel': bool(partitionState['name'] == 'EXIT_ENTRY_DELAY')})
                 ALARMSTATE['partition'][partitionNumber]['status'].update({'exit_delay': bool(partitionState['name'] == 'EXIT_ENTRY_DELAY' and not previouslyArmed),
                                                                            'entry_delay': bool(partitionState['name'] == 'EXIT_ENTRY_DELAY' and previouslyArmed),
-                                                                           'armed': armed})
+                                                                           'armed': armed,
+                                                                           'ready': bool(partitionState['name'] == 'READY' or partitionState['name'] == 'READY_BYPASS')})
+                if partitionState['name'] == 'NOT_READY': ALARMSTATE['partition'][partitionNumber]['status'].update({'ready': False})
 
                 logging.debug('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
-                #logging.debug(json.dumps(ALARMSTATE))
+                logging.debug(json.dumps(ALARMSTATE))
 
     def handle_realtime_cid_event(self, data):
         eventTypeInt = int(data[0])
@@ -397,10 +441,10 @@ class EnvisalinkClient(LineOnlyReceiver):
         partition = data[4:6]
         zoneOrUser = int(data[6:9])
 
-        logging.debug('Event Type is '+eventType)
-        logging.debug('CID Type is '+cidEvent['type'])
-        logging.debug('CID Description is '+cidEvent['label'])
-        logging.debug('Partition is '+partition)
+        logging.debug('Event Type is ' + eventType)
+        logging.debug('CID Type is ' + cidEvent['type'])
+        logging.debug('CID Description is ' + cidEvent['label'])
+        logging.debug('Partition is ' + partition)
         logging.debug(cidEvent['type'] + ' value is ' + str(zoneOrUser))
 
         # notify plugins about if it is an event about arming or alarm
@@ -422,13 +466,13 @@ class EnvisalinkClient(LineOnlyReceiver):
         if cidEventInt == 401 and eventTypeInt == 1:  # disarmed away
             for plugin in self.plugins:
                 plugin.disarmedAway(currentUser)
-        if cidEventInt == 441 and eventTypeInt == 1:  #disarmed away
+        if cidEventInt == 441 and eventTypeInt == 1:  # disarmed away
             for plugin in self.plugins:
                 plugin.disarmedHome(currentUser)
-        if cidEventInt in range(100,164) and eventTypeInt == 1:   # alarm triggered
+        if cidEventInt in range(100, 164) and eventTypeInt == 1:   # alarm triggered
             for plugin in self.plugins:
                 plugin.alarmTriggered(cidEvent['label'], currentZone)
-        if cidEventInt in range(100,164) and eventTypeInt == 3:   # alarm in memory cleared
+        if cidEventInt in range(100, 164) and eventTypeInt == 3:   # alarm in memory cleared
             for plugin in self.plugins:
                 plugin.alarmCleared(cidEvent['label'], currentZone)
         if cidEventInt is 406 and eventTypeInt == 1:              # alarm cancelled by user
@@ -442,6 +486,8 @@ class EnvisalinkClient(LineOnlyReceiver):
         for zoneNumber, zoneTimer in enumerate(zoneTimers, start=1):
             zoneName = self._config.ZONENAMES[zoneNumber]
             if zoneName:
+                self.ensure_init_alarmstate('zone', zoneNumber)
+                ALARMSTATE['zone'][zoneNumber]['lastfault'] = zoneTimer
                 logging.debug("%s (zone %i) %s", zoneName, zoneNumber, zoneTimer)
 
     # convert a zone dump into something humans can make sense of
@@ -469,11 +515,11 @@ class EnvisalinkClient(LineOnlyReceiver):
             itemLastClosed = self.humanTimeAgo(timedelta(seconds=itemSeconds))
 
             if itemHexString == "FFFF":
-                itemLastClosed = "is currently Open"
+                itemLastClosed = "Currently Open"
             if itemHexString == "0000":
-                itemLastClosed = "last Closed longer ago than I can remember"
+                itemLastClosed = "Last Closed longer ago than I can remember"
             else:
-                itemLastClosed = "last Closed " + itemLastClosed
+                itemLastClosed = "Last Closed " + itemLastClosed
 
             returnItems.append(str(itemLastClosed))
         return returnItems
@@ -513,15 +559,6 @@ class EnvisalinkClient(LineOnlyReceiver):
         human_delta = ', '.join(hlist)
         return the_tense.format(human_delta)
 
-    def ensure_init_alarmstate(self, partitionNumber):
-        if 'partition' not in ALARMSTATE: ALARMSTATE['partition'] = {'lastevents': []}
-        if partitionNumber in self._config.PARTITIONNAMES:
-            if partitionNumber not in ALARMSTATE['partition']: ALARMSTATE['partition'][partitionNumber] = {'name': self._config.PARTITIONNAMES[partitionNumber]}
-        else:
-            if partitionNumber not in ALARMSTATE['partition']: ALARMSTATE['partition'][partitionNumber] = {}
-        if 'lastevents' not in ALARMSTATE['partition'][partitionNumber]: ALARMSTATE['partition'][partitionNumber]['lastevents'] = []
-        if 'status' not in ALARMSTATE['partition'][partitionNumber]: ALARMSTATE['partition'][partitionNumber]['status'] = {}
-
 
 class AlarmServer(Resource):
     def __init__(self, config):
@@ -537,10 +574,15 @@ class AlarmServer(Resource):
         root = Resource()
         rootFilePath = sys.path[0] + os.sep + 'ext'
         root.putChild('app', File(rootFilePath))
+        root.putChild('img', File(rootFilePath))
         root.putChild('api', self)
         factory = Site(root)
         reactor.listenSSL(config.HTTPSPORT, factory,
                           ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
+
+        # check on the state of the envisalink connection repeatedly
+        lc = LoopingCall(self._envisalinkclient.check_alive)
+        lc.start(1)
 
     def cleanup(self):
         self._envisalinkclient.cleanup(False)
@@ -570,13 +612,13 @@ class AlarmServer(Resource):
         if myPath == '/api':
             return json.dumps(ALARMSTATE)
         elif myPath == '/api/alarm/arm':
-            self._envisalinkclient.send_data(alarmcode+'2')
+            self._envisalinkclient.send_data(alarmcode + '2')
             return json.dumps({'response': 'Arm command sent to Envisalink.'})
         elif myPath == '/api/alarm/stayarm':
-            self._envisalinkclient.send_data(alarmcode+'3')
+            self._envisalinkclient.send_data(alarmcode + '3')
             return json.dumps({'response': 'Arm Home command sent to Envisalink.'})
         elif myPath == '/api/alarm/disarm':
-            self._envisalinkclient.send_data(alarmcode+'1')
+            self._envisalinkclient.send_data(alarmcode + '1')
             return json.dumps({'response': 'Disarm command sent to Envisalink.'})
         elif myPath == '/api/partition':
             changeTo = query_array['changeto'][0]
@@ -596,7 +638,7 @@ class AlarmServer(Resource):
 
 
 def usage():
-    print 'Usage: '+sys.argv[0]+' -c <configfile>'
+    print 'Usage: ' + sys.argv[0] + ' -c <configfile>'
 
 
 def main(argv):

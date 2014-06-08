@@ -14,16 +14,6 @@ window.matchMediaDesktop = function () {
 	return matchMedia('(min-width: 979px)').matches;
 }
 
-$.ajax({
-	type: "GET",
-	url: "/api/config/eventtimeago",
-	contentType: "application/json; charset=utf-8",
-	dataType: "json",
-	data: "{}",
-	success: function (res) {
-		timeago = res.eventtimeago.toLowerCase() == "true";
-	}
-});
 
 function createEvents(list) {
 	var source = $("#events-template").html();
