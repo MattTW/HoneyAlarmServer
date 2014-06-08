@@ -40,11 +40,11 @@ class sssPlugin(BasePlugin):
 
     def signonSS(self):
         loginParams = {'account': self._USERNAME,
-                     'passwd': self._PASSWORD,
-                     'api': 'SYNO.API.Auth',
-                     'method': 'Login',
-                     'version': self._API_VERSION,
-                     'session': 'SurveillanceStation'}
+                       'passwd': self._PASSWORD,
+                       'api': 'SYNO.API.Auth',
+                       'method': 'Login',
+                       'version': self._API_VERSION,
+                       'session': 'SurveillanceStation'}
         r = self._session.get(self._rootURL + "/auth.cgi", params=loginParams)
         self.checkResponse(r, 'login')
         if not r.json()['success']:
@@ -62,6 +62,10 @@ class sssPlugin(BasePlugin):
             self.checkResponse(r, 'Record ' + recordAction)
 
     def cameraEnable(self, shouldEnable):
+        cameras = self.listCameras()
+        if not cameras:
+            logging.error("Could not retrieve list of cameras to enable!")
+            return
         for camera in self.listCameras():
             enableAction = 'cameraEnable' if shouldEnable else 'cameraDisable'
             params = {'idList': str(camera['id']),
@@ -75,7 +79,7 @@ class sssPlugin(BasePlugin):
                   'method': 'List',
                   'version': self._API_VERSION}
         r = self._session.get(self._rootURL + '/SurveillanceStation/camera.cgi', params=params)
-        if not self.checkResponse(r, 'List Cameras'): return
+        if not self.checkResponse(r, 'List Cameras'): return False
         return r.json()['data']['cameras']
 
     def checkResponse(self, response, action):
