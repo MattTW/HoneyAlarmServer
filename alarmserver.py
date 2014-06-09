@@ -10,7 +10,6 @@
 import os
 import sys
 import json
-import time
 import getopt
 import logging
 import re
@@ -22,8 +21,7 @@ from twisted.web.server import Site
 from twisted.web.static import File
 from twisted.protocols.basic import LineOnlyReceiver
 from twisted.internet.task import LoopingCall
-from twisted.internet.protocol import Factory
-from twisted.internet.endpoints import TCP4ClientEndpoint
+from twisted.internet.protocol import ReconnectingClientFactory
 from twisted.python import log
 
 from envisalinkdefs import *
@@ -111,7 +109,7 @@ class AlarmServerConfig(BaseConfig):
                                                           False, 'str', True)
 
 
-class EnvisalinkClientFactory(Factory):
+class EnvisalinkClientFactory(ReconnectingClientFactory):
     singleton = None
 
     @classmethod
@@ -119,7 +117,22 @@ class EnvisalinkClientFactory(Factory):
         cls.singleton = e
 
     def buildProtocol(self, addr):
+        logging.debug("%s connection estblished to %s:%s", addr.type, addr.host, addr.port)
+        logging.debug("resetting connection delay")
+        self.resetDelay()
         return EnvisalinkClientFactory.singleton
+
+    def startedConnecting(self, connector):
+        logging.debug("Started to connect to Envisalink...")
+
+    def clientConnectionLost(self, connector, reason):
+        logging.debug('Lost connection to Envisalink.  Reason: ', reason)
+        ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
+
+    def clientConnectionFailed(self, connector, reason):
+        logging.debug('Connection failed to Envisalink. Reason: ', reason)
+        ReconnectingClientFactory.clientConnectionFailed(self, connector,
+                                                         reason)
 
 
 class EnvisalinkClient(LineOnlyReceiver):
@@ -131,9 +144,6 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         # Set config
         self._config = config
-
-        # Reconnect delay
-        self._reconnectdelay = 10
 
         # is there a command to the envisalink pending
         self._commandinprogress = False
@@ -154,9 +164,9 @@ class EnvisalinkClient(LineOnlyReceiver):
     def shutdownEvent(self):
         self._shuttingdown = True
         logging.info("Twisted reactor is shutting down...")
-        self.cleanup(False)
+        self.cleanup()
 
-    def do_connect(self, reconnect=False):
+    def do_connect(self):
         self._commandinprogress = False
         now = datetime.now()
         self._lastkeypadupdate = now
@@ -164,26 +174,14 @@ class EnvisalinkClient(LineOnlyReceiver):
         self._lastzonedump = now
         self._lastcommand = now
         self._lastcommandresponse = now
-        # Create the socket and connect to the server
-        if reconnect:
-            logging.warning('Connection failed, retrying in ' +
-                            str(self._reconnectdelay) + ' seconds')
-            self._buffer = []
-            time.sleep(self._reconnectdelay)
 
-        point = TCP4ClientEndpoint(reactor, self._config.ENVISALINKHOST, self._config.ENVISALINKPORT)
-        d = point.connect(EnvisalinkClientFactory())
-        d.addCallback(self.gotProtocol)
+        reactor.connectTCP(self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, EnvisalinkClientFactory())
 
-    def gotProtocol(self, p):
-        logging.debug("Got Protocol for Envisalink...")
-
-    def cleanup(self, reconnect=True):
+    def cleanup(self):
         logging.debug("Cleaning up Envisalink client...")
-        self._loggedin = False
+        self._loggedin=False
         self.transport.loseConnection()
-        if reconnect:
-            self.do_connect(True)
+
 
     def send_data(self, data):
         logging.debug('TX > ' + data)
@@ -201,7 +199,7 @@ class EnvisalinkClient(LineOnlyReceiver):
                 logging.error(message)
                 for plugin in self.plugins:
                     plugin.envisalinkUnresponsive(message)
-                self.cleanup(True)
+                self.cleanup()
                 return
 
             # is it time to poll again?
@@ -225,7 +223,7 @@ class EnvisalinkClient(LineOnlyReceiver):
                 logging.error(message)
                 for plugin in self.plugins:
                     plugin.envisalinkUnresponsive(message)
-                self.cleanup(True)
+                self.cleanup()
                 return
 
 
@@ -259,7 +257,7 @@ class EnvisalinkClient(LineOnlyReceiver):
     def connectionLost(self, reason):
         logging.info("Disconnected from %s:%i, reason was %s" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, reason.getErrorMessage()))
         if not self._shuttingdown:
-            self.cleanup(True)
+            self.cleanup()
 
     def lineReceived(self, input):
         if input != '':
@@ -585,7 +583,7 @@ class AlarmServer(Resource):
         lc.start(1)
 
     def cleanup(self):
-        self._envisalinkclient.cleanup(False)
+        self._envisalinkclient.cleanup()
         logging.debug("Cleaning up AlarmServer...")
         self.close()
 
