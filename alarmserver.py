@@ -21,7 +21,7 @@ from twisted.web.server import Site
 from twisted.web.static import File
 from twisted.protocols.basic import LineOnlyReceiver
 from twisted.internet.task import LoopingCall
-from twisted.internet.protocol import ReconnectingClientFactory
+from twisted.internet.protocol import ReconnectingClientFactory, ClientCreator
 from twisted.python import log
 
 from envisalinkdefs import *
@@ -110,27 +110,32 @@ class AlarmServerConfig(BaseConfig):
 
 
 class EnvisalinkClientFactory(ReconnectingClientFactory):
-    singleton = None
 
-    @classmethod
-    def setSingleton(cls, e):
-        cls.singleton = e
+    # we will only ever have one connection to envisalink at a time
+    envisalinkClient = None
+
+    def __init__(self, config):
+        self._config = config
 
     def buildProtocol(self, addr):
         logging.debug("%s connection estblished to %s:%s", addr.type, addr.host, addr.port)
         logging.debug("resetting connection delay")
         self.resetDelay()
-        return EnvisalinkClientFactory.singleton
+        self.envisalinkClient = EnvisalinkClient(self._config)
+        # check on the state of the envisalink connection repeatedly
+        lc = LoopingCall(self.envisalinkClient.check_alive)
+        lc.start(1)
+        return self.envisalinkClient
 
     def startedConnecting(self, connector):
         logging.debug("Started to connect to Envisalink...")
 
     def clientConnectionLost(self, connector, reason):
-        logging.debug('Lost connection to Envisalink.  Reason: ', reason)
+        logging.debug('Lost connection to Envisalink.  Reason: ', str(reason))
         ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
     def clientConnectionFailed(self, connector, reason):
-        logging.debug('Connection failed to Envisalink. Reason: ', reason)
+        logging.debug('Connection failed to Envisalink. Reason: ', str(reason))
         ReconnectingClientFactory.clientConnectionFailed(self, connector,
                                                          reason)
 
@@ -159,14 +164,6 @@ class EnvisalinkClient(LineOnlyReceiver):
             plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
             self.plugins.append(plugin(plugincfg))
 
-        self.do_connect()
-
-    def shutdownEvent(self):
-        self._shuttingdown = True
-        logging.info("Twisted reactor is shutting down...")
-        self.cleanup()
-
-    def do_connect(self):
         self._commandinprogress = False
         now = datetime.now()
         self._lastkeypadupdate = now
@@ -175,13 +172,15 @@ class EnvisalinkClient(LineOnlyReceiver):
         self._lastcommand = now
         self._lastcommandresponse = now
 
-        reactor.connectTCP(self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, EnvisalinkClientFactory())
+    def shutdownEvent(self):
+        self._shuttingdown = True
+        logging.info("Twisted reactor is shutting down...")
+        self.cleanup()
 
     def cleanup(self):
         logging.debug("Cleaning up Envisalink client...")
-        self._loggedin=False
+        self._loggedin = False
         self.transport.loseConnection()
-
 
     def send_data(self, data):
         logging.debug('TX > ' + data)
@@ -359,13 +358,13 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         self.ensure_init_alarmstate("partition", partitionNumber)
         ALARMSTATE['partition'][partitionNumber]['status'].update({'alarm': bool(flags.alarm), 'alarm_in_memory': bool(flags.alarm_in_memory), 'armed_away': bool(flags.armed_away),
-                                                        'ac_present': bool(flags.ac_present), 'armed_bypass': bool(flags.bypass), 'chime': bool(flags.chime),
-                                                        'armed_zero_entry_delay': bool(flags.armed_zero_entry_delay), 'alarm_fire_zone': bool(flags.alarm_fire_zone),
-                                                        'trouble': bool(flags.system_trouble), 'ready': bool(flags.ready), 'fire': bool(flags.fire),
-                                                        'armed_stay': bool(flags.armed_stay),
-                                                        'alpha': alpha,
-                                                        'beep': beep,
-                                                        })
+                                                                   'ac_present': bool(flags.ac_present), 'armed_bypass': bool(flags.bypass), 'chime': bool(flags.chime),
+                                                                   'armed_zero_entry_delay': bool(flags.armed_zero_entry_delay), 'alarm_fire_zone': bool(flags.alarm_fire_zone),
+                                                                   'trouble': bool(flags.system_trouble), 'ready': bool(flags.ready), 'fire': bool(flags.fire),
+                                                                   'armed_stay': bool(flags.armed_stay),
+                                                                   'alpha': alpha,
+                                                                   'beep': beep,
+                                                                   })
 
         # if we have never yet received a partition state changed event,  we
         # need to compute the armed state ourselves. Don't want to always do
@@ -559,12 +558,14 @@ class EnvisalinkClient(LineOnlyReceiver):
 
 
 class AlarmServer(Resource):
+    _envisalinkClientFactory = None
+
     def __init__(self, config):
         Resource.__init__(self)
 
         # Create Envisalink client connection
-        self._envisalinkclient = EnvisalinkClient(config)
-        EnvisalinkClientFactory.setSingleton(self._envisalinkclient)   # for twisted
+        self._envisalinkClientFactory = EnvisalinkClientFactory(config)
+        reactor.connectTCP(config.ENVISALINKHOST, config.ENVISALINKPORT, self._envisalinkClientFactory)
 
         # Store config
         self._config = config
@@ -578,22 +579,17 @@ class AlarmServer(Resource):
         reactor.listenSSL(config.HTTPSPORT, factory,
                           ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
 
-        # check on the state of the envisalink connection repeatedly
-        lc = LoopingCall(self._envisalinkclient.check_alive)
-        lc.start(1)
 
     def cleanup(self):
-        self._envisalinkclient.cleanup()
+        #self._envisalinkclient.cleanup()
         logging.debug("Cleaning up AlarmServer...")
         self.close()
-
-    def check_envisalink_alive(self):
-        self._envisalinkclient.check_alive()
 
     def getChild(self, name, request):
         return self
 
     def render_GET(self, request):
+        e = self._envisalinkClientFactory.envisalinkClient
         logging.debug(request.uri)
         query = urlparse.urlparse(request.uri)
         logging.debug(query)
@@ -610,26 +606,26 @@ class AlarmServer(Resource):
         if myPath == '/api':
             return json.dumps(ALARMSTATE)
         elif myPath == '/api/alarm/arm':
-            self._envisalinkclient.send_data(alarmcode + '2')
+            se.send_data(alarmcode + '2')
             return json.dumps({'response': 'Arm command sent to Envisalink.'})
         elif myPath == '/api/alarm/stayarm':
-            self._envisalinkclient.send_data(alarmcode + '3')
+            e.send_data(alarmcode + '3')
             return json.dumps({'response': 'Arm Home command sent to Envisalink.'})
         elif myPath == '/api/alarm/disarm':
-            self._envisalinkclient.send_data(alarmcode + '1')
+            e.send_data(alarmcode + '1')
             return json.dumps({'response': 'Disarm command sent to Envisalink.'})
         elif myPath == '/api/partition':
             changeTo = query_array['changeto'][0]
             if not changeTo.isdigit():
                 return json.dumps({'response': 'changeTo parameter was missing or not a number, ignored.'})
             else:
-                self._envisalinkclient.change_partition(int(changeTo))
+                e.change_partition(int(changeTo))
                 return json.dumps({'response': 'Request to change current partition to %s was received.' % changeTo})
         elif myPath == '/api/testalarm':
-            self._envisalinkclient.handle_realtime_cid_event('1132010050')
+            e.handle_realtime_cid_event('1132010050')
             return 'OK, boss'
         elif myPath == '/api/testdump':
-            self._envisalinkclient.dump_zone_timers()
+            e.dump_zone_timers()
             return 'OK, boss'
         else:
             return NoResource().render(request)
