@@ -30,13 +30,11 @@ from baseConfig import BaseConfig
 from datetime import datetime
 from datetime import timedelta
 
-ALARMSTATE = {'version': 0.1}
+ALARMSTATE = {'version': 0.2, 'arm': False, 'disarm': False, 'cancel': False}
 MAXPARTITIONS = 16
 MAXZONES = 128
 MAXALARMUSERS = 47
 
-def initialize_alarmstate():
-    return
 
 class AlarmServerConfig(BaseConfig):
     def __init__(self, configfile):
@@ -109,6 +107,29 @@ class AlarmServerConfig(BaseConfig):
             self.ALARMUSERNAMES[i] = self.read_config_var('alarmserver',
                                                           'user' + str(i),
                                                           False, 'str', True)
+
+
+    def initialize_alarmstate(self):
+        ALARMSTATE['zone'] = {'lastevents': []}
+        for zoneNumber in self.ZONENAMES.keys():
+            zoneName = self.ZONENAMES[zoneNumber]
+            if not zoneName: continue
+            ALARMSTATE['zone'][zoneNumber] = {'name': zoneName, 'lastevents': [],
+                                              'lastfault': 'Last Closed longer ago than I can remember',
+                                              'status': {'open': False, 'fault': False, 'alarm': False, 'tamper': False}
+                                              }
+
+        ALARMSTATE['partition'] = {'lastevents': []}
+        for pNumber in self.PARTITIONNAMES.keys():
+            pName = self.PARTITIONNAMES[pNumber]
+            if not pName: continue
+            ALARMSTATE['partition'][pNumber] = {'name': pName, 'lastevents': [],
+                                                'lastfault': 'Last Closed longer ago than I can remember',
+                                                'status': {'alarm': False, 'alarm_in_memory': False, 'armed_away': False,
+                                                           'ac_present': False, 'armed_bypass': False, 'chime': False,
+                                                           'armed_zero_entry_delay': False, 'alarm_fire_zone': False,
+                                                           'trouble': False, 'ready': False, 'fire': False,
+                                                           'armed_stay': False, 'alpha': False, 'beep': False}}
 
 
 class EnvisalinkClientFactory(ReconnectingClientFactory):
@@ -325,32 +346,6 @@ class EnvisalinkClient(LineOnlyReceiver):
         if code != '00':
             logging.error("error sending command to envisalink.  Response was: " + responseString)
 
-    # this is pretty hackish, refactor or redo it eventually when the ALARMSTATE format feels finalized
-    def ensure_init_alarmstate(self, zoneOrPartitionType, zoneOrPartitionNumber):
-        if 'arm' not in ALARMSTATE: ALARMSTATE.update({'arm': False, 'disarm': False, 'cancel': False})
-        if zoneOrPartitionType not in {'zone', 'partition'}: return
-        if zoneOrPartitionType == 'zone':
-            nameMap = self._config.ZONENAMES
-            defaultstatus = {'open': False, 'fault': False, 'alarm': False, 'tamper': False}
-        else:
-            nameMap = self._config.PARTITIONNAMES
-            defaultstatus = {'alarm': False, 'alarm_in_memory': False, 'armed_away': False,
-                             'ac_present': False, 'armed_bypass': False, 'chime': False,
-                             'armed_zero_entry_delay': False, 'alarm_fire_zone': False,
-                             'trouble': False, 'ready': False, 'fire': False,
-                             'armed_stay': False, 'alpha': False, 'beep': False}
-
-        if zoneOrPartitionType not in ALARMSTATE: ALARMSTATE[zoneOrPartitionType] = {'lastevents': []}
-        if zoneOrPartitionNumber in nameMap:
-            if zoneOrPartitionNumber not in ALARMSTATE[zoneOrPartitionType]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber] = {'name': nameMap[zoneOrPartitionNumber]}
-        else:
-            if zoneOrPartitionNumber not in ALARMSTATE[zoneOrPartitionType]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber] = {}
-        if 'lastevents' not in ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['lastevents'] = []
-        if 'status' not in ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]:
-            ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['status'] = {}
-            ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['status'].update(defaultstatus)
-        if 'lastfault' not in ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]: ALARMSTATE[zoneOrPartitionType][zoneOrPartitionNumber]['lastfault'] = 'Last Closed longer ago than I can remember'
-
     def handle_keypad_update(self, data):
         self._lastkeypadupdate = datetime.now()
         dataList = data.split(',')
@@ -366,7 +361,6 @@ class EnvisalinkClient(LineOnlyReceiver):
         beep = evl_Virtual_Keypad_How_To_Beep.get(dataList[3], 'unknown')
         alpha = dataList[4]
 
-        self.ensure_init_alarmstate("partition", partitionNumber)
         ALARMSTATE['partition'][partitionNumber]['status'].update({'alarm': bool(flags.alarm), 'alarm_in_memory': bool(flags.alarm_in_memory), 'armed_away': bool(flags.armed_away),
                                                                    'ac_present': bool(flags.ac_present), 'armed_bypass': bool(flags.bypass), 'chime': bool(flags.chime),
                                                                    'armed_zero_entry_delay': bool(flags.armed_zero_entry_delay), 'alarm_fire_zone': bool(flags.alarm_fire_zone),
@@ -415,7 +409,6 @@ class EnvisalinkClient(LineOnlyReceiver):
         for zoneNumber, zoneBit in enumerate(zonefieldString, start=1):
             zoneName = self._config.ZONENAMES[zoneNumber]
             if zoneName:    # defined in config with name (i.e. we care about it?)
-                self.ensure_init_alarmstate('zone', zoneNumber)
                 ALARMSTATE['zone'][zoneNumber]['status'].update({'open': zoneBit == '1', 'fault': zoneBit == '1'})
                 logging.debug("%s (zone %i) is %s", zoneName, zoneNumber, "Open/Faulted" if zoneBit == '1' else "Closed/Not Faulted")
 
@@ -426,8 +419,6 @@ class EnvisalinkClient(LineOnlyReceiver):
             partitionState = evl_Partition_Status_Codes[str(partitionStateCode)]
             if partitionState['name'] != 'NOT_USED':
                 partitionNumber = currentIndex + 1
-                # TODO can we use dict.setdefault or defaultdict here instead?
-                self.ensure_init_alarmstate("partition", partitionNumber)
                 previouslyArmed = ALARMSTATE['partition'][partitionNumber]['status'].get('armed', False)
                 armed = partitionState['name'] in ('ARMED_STAY', 'ARMED_AWAY', 'ARMED_MAX')
                 ALARMSTATE.update({'arm': not armed, 'disarm': armed, 'cancel': bool(partitionState['name'] == 'EXIT_ENTRY_DELAY')})
@@ -493,7 +484,6 @@ class EnvisalinkClient(LineOnlyReceiver):
         for zoneNumber, zoneTimer in enumerate(zoneTimers, start=1):
             zoneName = self._config.ZONENAMES[zoneNumber]
             if zoneName:
-                self.ensure_init_alarmstate('zone', zoneNumber)
                 ALARMSTATE['zone'][zoneNumber]['lastfault'] = zoneTimer
                 logging.debug("%s (zone %i) %s", zoneName, zoneNumber, zoneTimer)
 
@@ -679,6 +669,9 @@ if __name__ == "__main__":
 
     observer = log.PythonLoggingObserver()
     observer.start()
+
+
+    config.initialize_alarmstate()
     server = AlarmServer(config)
 
     try:
