@@ -21,7 +21,7 @@ from twisted.web.server import Site
 from twisted.web.static import File
 from twisted.protocols.basic import LineOnlyReceiver
 from twisted.internet.task import LoopingCall
-from twisted.internet.protocol import ReconnectingClientFactory, ClientCreator
+from twisted.internet.protocol import ReconnectingClientFactory
 from twisted.python import log
 
 from envisalinkdefs import *
@@ -35,6 +35,8 @@ MAXPARTITIONS = 16
 MAXZONES = 128
 MAXALARMUSERS = 47
 
+def initialize_alarmstate():
+    return
 
 class AlarmServerConfig(BaseConfig):
     def __init__(self, configfile):
@@ -114,6 +116,8 @@ class EnvisalinkClientFactory(ReconnectingClientFactory):
     # we will only ever have one connection to envisalink at a time
     envisalinkClient = None
 
+    _currentLoopingCall = None
+
     def __init__(self, config):
         self._config = config
 
@@ -123,8 +127,8 @@ class EnvisalinkClientFactory(ReconnectingClientFactory):
         self.resetDelay()
         self.envisalinkClient = EnvisalinkClient(self._config)
         # check on the state of the envisalink connection repeatedly
-        lc = LoopingCall(self.envisalinkClient.check_alive)
-        lc.start(1)
+        self._currentLoopingCall = LoopingCall(self.envisalinkClient.check_alive)
+        self._currentLoopingCall.start(1)
         return self.envisalinkClient
 
     def startedConnecting(self, connector):
@@ -132,10 +136,12 @@ class EnvisalinkClientFactory(ReconnectingClientFactory):
 
     def clientConnectionLost(self, connector, reason):
         logging.debug('Lost connection to Envisalink.  Reason: ', str(reason))
+        self._currentLoopingCall.stop()
         ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
     def clientConnectionFailed(self, connector, reason):
         logging.debug('Connection failed to Envisalink. Reason: ', str(reason))
+        self._currentLoopingCall.stop()
         ReconnectingClientFactory.clientConnectionFailed(self, connector,
                                                          reason)
 
@@ -155,7 +161,7 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         self._shuttingdown = False
 
-        reactor.addSystemEventTrigger('before', 'shutdown', self.shutdownEvent)
+        self._triggerid = reactor.addSystemEventTrigger('before', 'shutdown', self.shutdownEvent)
 
         # find plugins and load/config them
         self.plugins = []
@@ -171,6 +177,10 @@ class EnvisalinkClient(LineOnlyReceiver):
         self._lastzonedump = now
         self._lastcommand = now
         self._lastcommandresponse = now
+
+    def __del__(self):
+        logging.debug("Removing old shutdown event trigger")
+        reactor.removeSystemEventTrigger(self._triggerid)
 
     def shutdownEvent(self):
         self._shuttingdown = True
