@@ -156,12 +156,12 @@ class EnvisalinkClientFactory(ReconnectingClientFactory):
         logging.debug("Started to connect to Envisalink...")
 
     def clientConnectionLost(self, connector, reason):
-        logging.debug('Lost connection to Envisalink.  Reason: ', str(reason))
+        logging.debug('Lost connection to Envisalink.  Reason: %s', str(reason))
         self._currentLoopingCall.stop()
         ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
     def clientConnectionFailed(self, connector, reason):
-        logging.debug('Connection failed to Envisalink. Reason: ', str(reason))
+        logging.debug('Connection failed to Envisalink. Reason: %s', str(reason))
         self._currentLoopingCall.stop()
         ReconnectingClientFactory.clientConnectionFailed(self, connector,
                                                          reason)
