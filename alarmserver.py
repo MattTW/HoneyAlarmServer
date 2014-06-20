@@ -177,9 +177,6 @@ class EnvisalinkClient(LineOnlyReceiver):
         # Set config
         self._config = config
 
-        # is there a command to the envisalink pending
-        self._commandinprogress = False
-
         self._shuttingdown = False
 
         self._triggerid = reactor.addSystemEventTrigger('before', 'shutdown', self.shutdownEvent)
@@ -211,6 +208,7 @@ class EnvisalinkClient(LineOnlyReceiver):
     def cleanup(self):
         logging.debug("Cleaning up Envisalink client...")
         self._loggedin = False
+        if not hasattr(self, 'tranport'): return
         self.transport.loseConnection()
 
     def send_data(self, data):
@@ -379,7 +377,7 @@ class EnvisalinkClient(LineOnlyReceiver):
             ALARMSTATE.update({'arm': not armed, 'disarm': armed})
             ALARMSTATE['partition'][partitionNumber]['status'].update({'armed': armed})
 
-        logging.debug(json.dumps(ALARMSTATE))
+        #logging.debug(json.dumps(ALARMSTATE))
 
     def handle_zone_state_change(self, data):
         # Envisalink TPI is inconsistent at generating these
