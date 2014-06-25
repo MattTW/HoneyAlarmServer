@@ -409,6 +409,15 @@ class EnvisalinkClient(LineOnlyReceiver):
             if zoneName:    # defined in config with name (i.e. we care about it?)
                 ALARMSTATE['zone'][zoneNumber]['status'].update({'open': zoneBit == '1', 'fault': zoneBit == '1'})
                 logging.debug("%s (zone %i) is %s", zoneName, zoneNumber, "Open/Faulted" if zoneBit == '1' else "Closed/Not Faulted")
+                # Save zoneStatus
+                if zoneBit == '1':
+                  zoneStatus = "open"
+                else:
+                  zoneStatus = "closed"
+
+                # Send to plugin
+                for plugin in self.plugins:
+                  plugin.zoneStatus(zoneNumber, zoneStatus)
 
     def handle_partition_state_change(self, data):
         self._has_partition_state_changed = True
@@ -428,6 +437,10 @@ class EnvisalinkClient(LineOnlyReceiver):
 
                 logging.debug('Parition ' + str(partitionNumber) + ' is in state ' + partitionState['name'])
                 logging.debug(json.dumps(ALARMSTATE))
+
+                # Send to plugin
+                for plugin in self.plugins:
+                  plugin.partitionStatus(partitionNumber, partitionState)
 
     def handle_realtime_cid_event(self, data):
         eventTypeInt = int(data[0])
