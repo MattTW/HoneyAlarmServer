@@ -208,7 +208,7 @@ class EnvisalinkClient(LineOnlyReceiver):
     def cleanup(self):
         logging.debug("Cleaning up Envisalink client...")
         self._loggedin = False
-        if not hasattr(self, 'tranport'): return
+        if not hasattr(self, 'transport'): return
         self.transport.loseConnection()
 
     def send_data(self, data):
