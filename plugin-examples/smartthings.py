@@ -52,16 +52,25 @@ class SmartthingsPlugin(BasePlugin):
         self.postAndCheckresponse()
 
     def zoneStatus(self, zone, status):
-        self._payload['message'] = "Zone %s status is: %s" % (zone, status)
+        # Goofy for now but map open/closed to DSC event numbers 609 and 610 so we don't have to modify the Smartthings app for DSC
+        if status == 'open':
+          code = 609
+        else:
+          code = 610
+
+        # Make the proper URL now
+        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/zone" + str(int(parameters)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
+        logger.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
     def partitionStatus(self, partition, status):
-        self._payload['message'] = "Partition %s status is: %s" % (partition, status)
+        self._urlbase = self._config.CALLBACKURL_BASE + "/" + self._config.CALLBACKURL_APP_ID + "/panel/" + str(code) + "/partition" + str(partition) + "?access_token=" + self._config.CALLBACKURL_ACCESS_TOKEN
+        logger.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
     def postAndCheckresponse(self):
         try:
-            response = requests.post(self._urlbase, data=self._payload, timeout=3)
+            response = requests.get(self._urlbase, timeout=3)
             if response.status_code != requests.codes.ok:
                 logging.error("Problem sending a smartthings notification, status code was %i, response content was %s" %
                               (response.status_code, response.text))
