@@ -2,7 +2,6 @@ import requests
 import logging
 from basePlugin import BasePlugin
 
-
 class SmartthingsPlugin(BasePlugin):
     def __init__(self, configfile):
         # call ancestor for common setup
