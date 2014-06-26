@@ -59,11 +59,24 @@ class SmartthingsPlugin(BasePlugin):
           code = 610
 
         # Make the proper URL now
-        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/zone" + str(int(parameters)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
+        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/zone" + str(int(zone)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
         logger.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
     def partitionStatus(self, partition, status):
+        # Map HoneyAlarm states to DSC codes
+        # NOTE: EXIT_ENTRY_DELAY is both exit and entry, currently maped to exit delay on DSC codes
+        # how to fix that?
+        dscCodes = { 'READY': 650,
+            'NOT_READY': 651,
+            'IN_ALARM': 654,
+            'EXIT_ENTRY_DELAY': 656,
+            'ARMED_STAY': 652,
+            'ARMED_AWAY': 652,
+            'ARMED_MAX': 652,
+            'READY_BYPASS': 702
+            }
+        code = dscCodes[status]
         self._urlbase = self._config.CALLBACKURL_BASE + "/" + self._config.CALLBACKURL_APP_ID + "/panel/" + str(code) + "/partition" + str(partition) + "?access_token=" + self._config.CALLBACKURL_ACCESS_TOKEN
         logger.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
