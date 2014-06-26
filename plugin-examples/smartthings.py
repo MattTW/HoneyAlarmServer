@@ -60,7 +60,7 @@ class SmartthingsPlugin(BasePlugin):
 
         # Make the proper URL now
         self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/zone" + str(int(zone)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
-        logger.debug("URL: %s" % self._urlbase)
+        logging.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
     def partitionStatus(self, partition, status):
@@ -78,7 +78,7 @@ class SmartthingsPlugin(BasePlugin):
             }
         code = dscCodes[status]
         self._urlbase = self._config.CALLBACKURL_BASE + "/" + self._config.CALLBACKURL_APP_ID + "/panel/" + str(code) + "/partition" + str(partition) + "?access_token=" + self._config.CALLBACKURL_ACCESS_TOKEN
-        logger.debug("URL: %s" % self._urlbase)
+        logging.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
     def postAndCheckresponse(self):
