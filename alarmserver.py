@@ -440,7 +440,7 @@ class EnvisalinkClient(LineOnlyReceiver):
 
                 # Send to plugin
                 for plugin in self.plugins:
-                  plugin.partitionStatus(partitionNumber, partitionState)
+                  plugin.partitionStatus(partitionNumber, partitionState['name'])
 
     def handle_realtime_cid_event(self, data):
         eventTypeInt = int(data[0])
