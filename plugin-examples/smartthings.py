@@ -76,7 +76,7 @@ class SmartthingsPlugin(BasePlugin):
             'READY_BYPASS': 702
             }
         code = dscCodes[status]
-        self._urlbase = self._config.CALLBACKURL_BASE + "/" + self._config.CALLBACKURL_APP_ID + "/panel/" + str(code) + "/partition" + str(partition) + "?access_token=" + self._config.CALLBACKURL_ACCESS_TOKEN
+        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/partition" + str(partition) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
         logging.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
