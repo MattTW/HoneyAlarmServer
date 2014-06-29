@@ -15,6 +15,7 @@ class SmartthingsPlugin(BasePlugin):
         #  URL example: ${callbackurl_base}/${callbackurl_app_id}/panel/${code}/${zoneorpartitionnumber}?access_token=${callbackurl_access_token}
 
         self._payload = {}
+        self._urlbase = ""
 
     def armedAway(self, user):
         self._payload['message'] = "Security system armed away by " + user
