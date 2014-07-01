@@ -183,9 +183,11 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         # find plugins and load/config them
         self.plugins = []
+        logging.debug("Current working directory is %s", os.getcwd())
         pluginClasses = BasePlugin.find_subclasses("./plugins/")
         for plugin in pluginClasses:
             plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
+            logging.debug("Plugin config is %s", plugincfg)
             self.plugins.append(plugin(plugincfg))
 
         self._commandinprogress = False
@@ -604,7 +606,7 @@ class AlarmServer(Resource):
         if myPath == '/api':
             return json.dumps(ALARMSTATE)
         elif myPath == '/api/alarm/arm':
-            se.send_data(alarmcode + '2')
+            e.send_data(alarmcode + '2')
             return json.dumps({'response': 'Arm command sent to Envisalink.'})
         elif myPath == '/api/alarm/stayarm':
             e.send_data(alarmcode + '3')
