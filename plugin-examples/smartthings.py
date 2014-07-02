@@ -59,7 +59,7 @@ class SmartthingsPlugin(BasePlugin):
           code = 610
 
         # Make the proper URL now
-        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/zone" + str(int(zone)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
+        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/" + str(int(zone)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
         logging.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
@@ -77,7 +77,7 @@ class SmartthingsPlugin(BasePlugin):
             'READY_BYPASS': 702
             }
         code = dscCodes[status]
-        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/partition" + str(partition) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
+        self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/" + str(partition) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
         logging.debug("URL: %s" % self._urlbase)
         self.postAndCheckresponse()
 
