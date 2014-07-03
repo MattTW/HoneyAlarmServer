@@ -32,6 +32,12 @@ class BasePlugin(BaseConfig):
     def envisalinkUnresponsive(self, condition):
         return
 
+    def zoneStatus(self, zone, status):
+        return
+
+    def partitionStatus(self, partition, status):
+        return
+
     # utility methods
     def isGuest(self, user): return isinstance(user, basestring) and user.lower().startswith('guest')
 
