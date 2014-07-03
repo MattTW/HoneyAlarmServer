@@ -34,7 +34,7 @@ ALARMSTATE = {'version': 0.2, 'arm': False, 'disarm': False, 'cancel': False}
 MAXPARTITIONS = 16
 MAXZONES = 128
 MAXALARMUSERS = 47
-
+shuttingdown = False
 
 class AlarmServerConfig(BaseConfig):
     def __init__(self, configfile):
@@ -108,7 +108,6 @@ class AlarmServerConfig(BaseConfig):
                                                           'user' + str(i),
                                                           False, 'str', True)
 
-
     def initialize_alarmstate(self):
         ALARMSTATE['zone'] = {'lastevents': []}
         for zoneNumber in self.ZONENAMES.keys():
@@ -134,11 +133,6 @@ class AlarmServerConfig(BaseConfig):
 
 class EnvisalinkClientFactory(ReconnectingClientFactory):
 
-    # we will only ever have one connection to envisalink at a time
-    envisalinkClient = None
-
-    _currentLoopingCall = None
-
     def __init__(self, config):
         self._config = config
 
@@ -156,13 +150,22 @@ class EnvisalinkClientFactory(ReconnectingClientFactory):
         logging.debug("Started to connect to Envisalink...")
 
     def clientConnectionLost(self, connector, reason):
-        logging.debug('Lost connection to Envisalink.  Reason: %s', str(reason))
-        self._currentLoopingCall.stop()
-        ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
+        if not shuttingdown:
+            logging.debug('Lost connection to Envisalink.  Reason: %s', str(reason))
+            if hasattr(self, "_currentLoopingCall"):
+                try:
+                    self._currentLoopingCall.stop()
+                except:
+                    logging.error("Error trying to stop looping call, ignoring...")
+            ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
     def clientConnectionFailed(self, connector, reason):
         logging.debug('Connection failed to Envisalink. Reason: %s', str(reason))
-        self._currentLoopingCall.stop()
+        if hasattr(self, "_currentLoopingCall"):
+            try:
+                self._currentLoopingCall.stop()
+            except:
+                logging.error("Error trying to stop looping call, ignoring...")
         ReconnectingClientFactory.clientConnectionFailed(self, connector,
                                                          reason)
 
@@ -176,10 +179,6 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         # Set config
         self._config = config
-
-        self._shuttingdown = False
-
-        self._triggerid = reactor.addSystemEventTrigger('before', 'shutdown', self.shutdownEvent)
 
         # find plugins and load/config them
         self.plugins = []
@@ -202,16 +201,11 @@ class EnvisalinkClient(LineOnlyReceiver):
         logging.debug("Removing old shutdown event trigger")
         reactor.removeSystemEventTrigger(self._triggerid)
 
-    def shutdownEvent(self):
-        self._shuttingdown = True
-        logging.info("Twisted reactor is shutting down...")
-        self.cleanup()
-
-    def cleanup(self):
-        logging.debug("Cleaning up Envisalink client...")
+    def logout(self):
+        logging.debug("Ending Envisalink client connection...")
         self._loggedin = False
-        if not hasattr(self, 'transport'): return
-        self.transport.loseConnection()
+        if hasattr(self, 'transport'):
+            self.transport.loseConnection()
 
     def send_data(self, data):
         logging.debug('TX > ' + data)
@@ -229,7 +223,7 @@ class EnvisalinkClient(LineOnlyReceiver):
                 logging.error(message)
                 for plugin in self.plugins:
                     plugin.envisalinkUnresponsive(message)
-                self.cleanup()
+                self.logout()
                 return
 
             # is it time to poll again?
@@ -253,7 +247,7 @@ class EnvisalinkClient(LineOnlyReceiver):
                 logging.error(message)
                 for plugin in self.plugins:
                     plugin.envisalinkUnresponsive(message)
-                self.cleanup()
+                self.logout()
                 return
 
 
@@ -285,9 +279,10 @@ class EnvisalinkClient(LineOnlyReceiver):
         logging.info("Connected to %s:%i" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT))
 
     def connectionLost(self, reason):
-        logging.info("Disconnected from %s:%i, reason was %s" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, reason.getErrorMessage()))
-        if not self._shuttingdown:
-            self.cleanup()
+        if not shuttingdown:
+            logging.info("Disconnected from %s:%i, reason was %s" % (self._config.ENVISALINKHOST, self._config.ENVISALINKPORT, reason.getErrorMessage()))
+            if self._loggedin:
+                self.logout()
 
     def lineReceived(self, input):
         if input != '':
@@ -413,13 +408,13 @@ class EnvisalinkClient(LineOnlyReceiver):
                 logging.debug("%s (zone %i) is %s", zoneName, zoneNumber, "Open/Faulted" if zoneBit == '1' else "Closed/Not Faulted")
                 # Save zoneStatus
                 if zoneBit == '1':
-                  zoneStatus = "open"
+                    zoneStatus = "open"
                 else:
-                  zoneStatus = "closed"
+                    zoneStatus = "closed"
 
                 # Send to plugin
                 for plugin in self.plugins:
-                  plugin.zoneStatus(zoneNumber, zoneStatus)
+                    plugin.zoneStatus(zoneNumber, zoneStatus)
 
     def handle_partition_state_change(self, data):
         self._has_partition_state_changed = True
@@ -442,7 +437,7 @@ class EnvisalinkClient(LineOnlyReceiver):
 
                 # Send to plugin
                 for plugin in self.plugins:
-                  plugin.partitionStatus(partitionNumber, partitionState['name'])
+                    plugin.partitionStatus(partitionNumber, partitionState['name'])
 
     def handle_realtime_cid_event(self, data):
         eventTypeInt = int(data[0])
@@ -571,14 +566,14 @@ class EnvisalinkClient(LineOnlyReceiver):
 
 
 class AlarmServer(Resource):
-    _envisalinkClientFactory = None
-
     def __init__(self, config):
         Resource.__init__(self)
 
+        self._triggerid = reactor.addSystemEventTrigger('before', 'shutdown', self.shutdownEvent)
+
         # Create Envisalink client connection
         self._envisalinkClientFactory = EnvisalinkClientFactory(config)
-        reactor.connectTCP(config.ENVISALINKHOST, config.ENVISALINKPORT, self._envisalinkClientFactory)
+        self._envisaconnect = reactor.connectTCP(config.ENVISALINKHOST, config.ENVISALINKPORT, self._envisalinkClientFactory)
 
         # Store config
         self._config = config
@@ -589,14 +584,16 @@ class AlarmServer(Resource):
         root.putChild('img', File(rootFilePath))
         root.putChild('api', self)
         factory = Site(root)
-        reactor.listenSSL(config.HTTPSPORT, factory,
-                          ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
+        self._port = reactor.listenSSL(config.HTTPSPORT, factory,
+                                       ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
 
-
-    def cleanup(self):
-        #self._envisalinkclient.cleanup()
-        logging.debug("Cleaning up AlarmServer...")
-        self.close()
+    def shutdownEvent(self):
+        global shuttingdown
+        shuttingdown = True
+        logging.debug("Shutting down AlarmServer...")
+        self._port.stopListening()
+        logging.debug("Disconnecting from Envisalink...")
+        self._envisaconnect.disconnect()
 
     def getChild(self, name, request):
         return self
@@ -640,6 +637,9 @@ class AlarmServer(Resource):
         elif myPath == '/api/testdump':
             e.dump_zone_timers()
             return 'OK, boss'
+        elif myPath == '/api/testreconnect':
+            e.logout()
+            return 'OK, boss'
         else:
             return NoResource().render(request)
 
@@ -670,7 +670,7 @@ if __name__ == "__main__":
     print('Using configuration file %s' % conffile)
     config = AlarmServerConfig(conffile)
     loggingconfig = {'level': config.LOGLEVEL,
-                     'format': '%(asctime)s %(levelname)s %(message)s',
+                     'format': '%(asctime)s %(levelname)s <%(name)s %(module)s %(funcName)s> %(message)s',
                      'datefmt': '%a, %d %b %Y %H:%M:%S'}
     if config.LOGFILE != '':
         loggingconfig['filename'] = config.LOGFILE
@@ -680,18 +680,16 @@ if __name__ == "__main__":
     logging.info('Currently Supporting Envisalink 2DS/3 only')
     logging.info('Tested on a Honeywell Vista 15p + EVL-3')
 
+    # allow Twisted to hook into our logging
     observer = log.PythonLoggingObserver()
     observer.start()
 
-
     config.initialize_alarmstate()
-    server = AlarmServer(config)
+    AlarmServer(config)
 
     try:
         reactor.run()
     except KeyboardInterrupt:
         print "Crtl+C pressed. Shutting down."
         logging.info('Shutting down from Ctrl+C')
-
-        server.cleanup()
         sys.exit()
