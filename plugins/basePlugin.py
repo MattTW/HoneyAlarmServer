@@ -41,25 +41,24 @@ class BasePlugin(BaseConfig):
     # utility methods
     def isGuest(self, user): return isinstance(user, basestring) and user.lower().startswith('guest')
 
-    # simple plugin system
-    subclasses = []
-
     @classmethod
     def find_subclasses(cls, path):
         """ Find all subclass of of this class in py files located below path
         (does look in sub directories)
         """
+        subclasses = []
         for root, dirs, files in os.walk(path):
             for name in files:
                 if name.endswith(".py") and not name.startswith("__"):
                     path = os.path.join(root[2:], name)     # remove ./ from beginning of root
                     modulename = path.rsplit('.', 1)[0].replace('/', '.')
-                    cls.look_for_subclass(modulename)
+                    subclasses.extend(cls.look_for_subclass(modulename))
 
-        return cls.subclasses
+        return subclasses
 
     @classmethod
     def look_for_subclass(cls, modulename):
+        mysubclasses = []
         logging.debug("searching %s" % (modulename))
         module = __import__(modulename)
 
@@ -75,9 +74,11 @@ class BasePlugin(BaseConfig):
 
             try:
                 if issubclass(entry, cls):
-                    logging.debug("Found subclass: "+key)
-                    cls.subclasses.append(entry)
+                    logging.debug("Found subclass: " + key)
+                    mysubclasses.append(entry)
             except TypeError:
                 # this happens when a non-type is passed in to issubclass. We
                 # don't care as it can't be a subclass of Job if it isn't a type
                 continue
+
+        return mysubclasses
