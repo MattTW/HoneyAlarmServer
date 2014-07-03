@@ -16,7 +16,7 @@ class sssPlugin(BasePlugin):
 
         self._rootURL = 'http://%s:%i/webapi' % (self._SERVER, self._PORT)
         self._session = requests.Session()
-        self.signonSS()
+        self._signedon = False
 
     def armedAway(self, user):
         self.cameraEnable(True)
@@ -45,10 +45,8 @@ class sssPlugin(BasePlugin):
                        'method': 'Login',
                        'version': self._API_VERSION,
                        'session': 'SurveillanceStation'}
-        r = self._session.get(self._rootURL + "/auth.cgi", params=loginParams)
-        self.checkResponse(r, 'login')
-        if not r.json()['success']:
-            logging.error("Unsuccessful login to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (r.url, r.status_code, r.json()))
+        if self.getAndCheckResponse(self._rootURL + "/auth.cgi", params=loginParams, 'login'):
+            self._signedon = True
 
     def cameraRecord(self, shouldRecord):
         for camera in self.listCameras():
@@ -58,8 +56,7 @@ class sssPlugin(BasePlugin):
                       'version': self._API_VERSION,
                       'cameraId': str(camera['id']),
                       'action': recordAction}
-            r = self._session.get(self._rootURL + '/SurveillanceStation/extrecord.cgi', params=params)
-            self.checkResponse(r, 'Record ' + recordAction)
+            self.getAndCheckResponse(self._rootURL + '/SurveillanceStation/extrecord.cgi', params=params, 'Record ' + recordAction)
 
     def cameraEnable(self, shouldEnable):
         cameras = self.listCameras()
@@ -71,19 +68,25 @@ class sssPlugin(BasePlugin):
             params = {'idList': str(camera['id']),
                       'action': enableAction}
             # undocumented, just snooped synology's web ui
-            r = self._session.get('http://%s:%i/webman/3rdparty/SurveillanceStation/cgi/camera.cgi' % (self._SERVER, self._PORT), params=params)
-            self.checkResponse(r, 'Enable ' + enableAction)
+            self.getAndCheckResponse('http://%s:%i/webman/3rdparty/SurveillanceStation/cgi/camera.cgi' % (self._SERVER, self._PORT), params=params, 'Enable ' + enableAction)
 
     def listCameras(self):
         params = {'api': 'SYNO.SurveillanceStation.Camera',
                   'method': 'List',
                   'version': self._API_VERSION}
-        r = self._session.get(self._rootURL + '/SurveillanceStation/camera.cgi', params=params)
-        if not self.checkResponse(r, 'List Cameras'): return False
+        if not getAndCheckResponse(self._rootURL + '/SurveillanceStation/camera.cgi', params=params, 'List Cameras'): return False
         return r.json()['data']['cameras']
 
-    def checkResponse(self, response, action):
-        if not response.json()['success']:
-            logging.error("Unsuccessful %s to Synology Surveillance Station.  url:'%s' status code: %s response:'%s'" % (action, response.url, response.status_code, response.json()))
+    def getAndCheckResponse(self, url, params, action):
+        if not self._signedon and action != 'login': self.signonSS()
+        try:
+            response = self._session.get(url, params, timeout=3)
+            if response.status_code != requests.codes.ok or if not response.json()['success']:
+                logging.error("Unsuccessful %s to Synology Surveillance Station. url: '%s' status code was %i, response content was %s",
+                              action, response.url, response.status_code, response.text)
+                return False
+        except requests.exceptions.RequestException as e:
+            logging.error("Exception performing action %s to Synology Surveillance Station.  Error number was %i, error text is %s", action, e.errno, e.strerror)
             return False
+
         return True

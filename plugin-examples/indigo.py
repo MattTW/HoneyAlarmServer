@@ -37,4 +37,4 @@ class IndigoPlugin(BasePlugin):
         self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(True)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
 
     def alarmCleared(self, alarmDescription, zone):
-        rself._session.put(self._urlbase + 'alarmTriggered', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
+        self._session.put(self._urlbase + 'alarmTriggered', data={'value': str(False)}, auth=HTTPDigestAuth(self._USERNAME,self._PASSWORD))
