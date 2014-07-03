@@ -45,7 +45,8 @@ class sssPlugin(BasePlugin):
                        'method': 'Login',
                        'version': self._API_VERSION,
                        'session': 'SurveillanceStation'}
-        if self.getAndCheckResponse(self._rootURL + "/auth.cgi", params=loginParams, 'login'):
+        success, _ = self.getAndCheckResponse(self._rootURL + "/auth.cgi", loginParams, 'login')
+        if success:
             self._signedon = True
 
     def cameraRecord(self, shouldRecord):
@@ -56,7 +57,7 @@ class sssPlugin(BasePlugin):
                       'version': self._API_VERSION,
                       'cameraId': str(camera['id']),
                       'action': recordAction}
-            self.getAndCheckResponse(self._rootURL + '/SurveillanceStation/extrecord.cgi', params=params, 'Record ' + recordAction)
+            self.getAndCheckResponse(self._rootURL + '/SurveillanceStation/extrecord.cgi', params, 'Record ' + recordAction)
 
     def cameraEnable(self, shouldEnable):
         cameras = self.listCameras()
@@ -68,25 +69,26 @@ class sssPlugin(BasePlugin):
             params = {'idList': str(camera['id']),
                       'action': enableAction}
             # undocumented, just snooped synology's web ui
-            self.getAndCheckResponse('http://%s:%i/webman/3rdparty/SurveillanceStation/cgi/camera.cgi' % (self._SERVER, self._PORT), params=params, 'Enable ' + enableAction)
+            self.getAndCheckResponse('http://%s:%i/webman/3rdparty/SurveillanceStation/cgi/camera.cgi' % (self._SERVER, self._PORT), params, 'Enable ' + enableAction)
 
     def listCameras(self):
         params = {'api': 'SYNO.SurveillanceStation.Camera',
                   'method': 'List',
                   'version': self._API_VERSION}
-        if not getAndCheckResponse(self._rootURL + '/SurveillanceStation/camera.cgi', params=params, 'List Cameras'): return False
-        return r.json()['data']['cameras']
+        success, returnJSON = self.getAndCheckResponse(self._rootURL + '/SurveillanceStation/camera.cgi', params, 'List Cameras')
+        if not success: return False
+        return returnJSON['data']['cameras']
 
     def getAndCheckResponse(self, url, params, action):
         if not self._signedon and action != 'login': self.signonSS()
         try:
-            response = self._session.get(url, params, timeout=3)
-            if response.status_code != requests.codes.ok or if not response.json()['success']:
+            response = self._session.get(url, params=params, timeout=3)
+            if response.status_code != requests.codes.ok or not response.json()['success']:
                 logging.error("Unsuccessful %s to Synology Surveillance Station. url: '%s' status code was %i, response content was %s",
                               action, response.url, response.status_code, response.text)
-                return False
+                return False, response.json()
         except requests.exceptions.RequestException as e:
             logging.error("Exception performing action %s to Synology Surveillance Station.  Error number was %i, error text is %s", action, e.errno, e.strerror)
-            return False
+            return False, "{}"
 
-        return True
+        return True, response.json()
