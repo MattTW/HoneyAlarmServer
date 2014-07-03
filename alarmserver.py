@@ -249,6 +249,9 @@ class EnvisalinkClient(LineOnlyReceiver):
 # application commands to the envisalink
 
     def send_command(self, code, data):
+        if not self._loggedin:
+            logging.error("Not connected to Envisalink - ignoring last command")
+            return
         if self._commandinprogress:
             logging.error("Command already in progress - ignoring last command")
             return
@@ -261,12 +264,19 @@ class EnvisalinkClient(LineOnlyReceiver):
         if partitionNumber < 1 or partitionNumber > 8:
             logging.error("Invalid Partition Number %i specified when trying to change partition, ignoring.", partitionNumber)
             return
-        if self._loggedin:
-            self.send_command('01', str(partitionNumber))
+        self.send_command('01', str(partitionNumber))
 
     def dump_zone_timers(self):
-        if self._loggedin:
-            self.send_command('02', '')
+        self.send_command('02', '')
+
+    def keypresses_to_default_partition(self, keypresses):
+        self.send_data(keypresses)
+
+    def keypresses_to_partition(self, partitionNumber, keypresses):
+        for char in keypresses:
+            to_send = '^03,' + str(partitionNumber) + ',' + char + '$'
+            logging.debug('TX > ' + to_send)
+            self.sendLine(to_send)
 
     # network communication callbacks
 
@@ -612,12 +622,14 @@ class AlarmServer(Resource):
             return json.dumps(ALARMSTATE)
         elif myPath == '/api/alarm/arm':
             e.send_data(alarmcode + '2')
+            #e.keypresses_to_partition(1, alarmcode + '2')
             return json.dumps({'response': 'Arm command sent to Envisalink.'})
         elif myPath == '/api/alarm/stayarm':
             e.send_data(alarmcode + '3')
             return json.dumps({'response': 'Arm Home command sent to Envisalink.'})
         elif myPath == '/api/alarm/disarm':
             e.send_data(alarmcode + '1')
+            #e.keypresses_to_partition(1, alarmcode + '1')
             return json.dumps({'response': 'Disarm command sent to Envisalink.'})
         elif myPath == '/api/partition':
             changeTo = query_array['changeto'][0]
