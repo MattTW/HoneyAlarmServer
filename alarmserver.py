@@ -182,11 +182,9 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         # find plugins and load/config them
         self.plugins = []
-        logging.debug("Current working directory is %s", os.getcwd())
         pluginClasses = BasePlugin.find_subclasses("./plugins/")
         for plugin in pluginClasses:
             plugincfg = "./plugins/" + plugin.__name__ + ".cfg"
-            logging.debug("Plugin config is %s", plugincfg)
             self.plugins.append(plugin(plugincfg))
 
         self._commandinprogress = False
@@ -196,10 +194,6 @@ class EnvisalinkClient(LineOnlyReceiver):
         self._lastzonedump = now
         self._lastcommand = now
         self._lastcommandresponse = now
-
-    def __del__(self):
-        logging.debug("Removing old shutdown event trigger")
-        reactor.removeSystemEventTrigger(self._triggerid)
 
     def logout(self):
         logging.debug("Ending Envisalink client connection...")
