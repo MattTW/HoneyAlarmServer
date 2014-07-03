@@ -70,7 +70,7 @@ class AlarmServerConfig(BaseConfig):
                                                    'user', 'str')
         self.ENVISAPOLLINTERVAL = self.read_config_var('envisalink',
                                                        'pollinterval',
-                                                       300, 'int')
+                                                       0, 'int')
         self.ENVISAZONEDUMPINTERVAL = self.read_config_var('envisalink',
                                                            'zonedumpinterval',
                                                            60, 'int')
@@ -221,10 +221,11 @@ class EnvisalinkClient(LineOnlyReceiver):
                 return
 
             # is it time to poll again?
-            delta = now - self._lastpoll
-            if delta > timedelta(seconds=self._config.ENVISAPOLLINTERVAL) and not self._commandinprogress:
-                self._lastpoll = now
-                self.send_command('00', '')
+            if self._config.ENVISAPOLLINTERVAL != 0:
+                delta = now - self._lastpoll
+                if delta > timedelta(seconds=self._config.ENVISAPOLLINTERVAL) and not self._commandinprogress:
+                    self._lastpoll = now
+                    self.send_command('00', '')
 
             # is it time to dump zone states again?
             delta = now - self._lastzonedump
