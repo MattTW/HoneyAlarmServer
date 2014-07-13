@@ -404,7 +404,7 @@ class EnvisalinkClient(LineOnlyReceiver):
                 dscCode = 'ARMED_STAY'
             elif flags.armed_away:
                 dscCode = 'ARMED_AWAY'
-            elif flags.armed_max:
+            elif flags.armed_zero_entry_delay:
                 dscCode = 'ARMED_MAX'
 
             for plugin in self.plugins:
