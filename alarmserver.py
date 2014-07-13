@@ -47,7 +47,7 @@ class AlarmServerConfig(BaseConfig):
                                                    True, 'bool')
         self.LISTENTYPE = self.read_config_var('alarmserver',
                                                'listentype',
-                                               'ssl', 'str')
+                                               'tcp', 'str')
         self.LISTENPORT = self.read_config_var('alarmserver',
                                                'listenport',
                                                8111, 'int')
