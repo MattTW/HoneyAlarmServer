@@ -15,7 +15,7 @@ import logging
 import re
 import urlparse
 
-from twisted.internet import ssl, reactor
+from twisted.internet import ssl, reactor, tcp
 from twisted.web.resource import Resource, NoResource
 from twisted.web.server import Site
 from twisted.web.static import File
@@ -73,6 +73,9 @@ class AlarmServerConfig(BaseConfig):
                                                        0, 'int')
         self.ENVISAZONEDUMPINTERVAL = self.read_config_var('envisalink',
                                                            'zonedumpinterval',
+                                                           60, 'int')
+        self.ENVISAKEYPADUPDATEINTERVAL = self.read_config_var('envisalink',
+                                                           'keypadupdateinterval',
                                                            60, 'int')
         self.ENVISACOMMANDTIMEOUT = self.read_config_var('envisalink',
                                                          'commandtimeout',
@@ -192,6 +195,7 @@ class EnvisalinkClient(LineOnlyReceiver):
         self._lastkeypadupdate = now
         self._lastpoll = now
         self._lastzonedump = now
+        self._lastpartitionupdate = now
         self._lastcommand = now
         self._lastcommandresponse = now
 
@@ -379,6 +383,29 @@ class EnvisalinkClient(LineOnlyReceiver):
             ALARMSTATE.update({'arm': not armed, 'disarm': armed})
             ALARMSTATE['partition'][partitionNumber]['status'].update({'armed': armed})
 
+        now = datetime.now()
+        delta = now - self._lastpartitionupdate 
+        if delta > timedelta(seconds=self._config.ENVISAKEYPADUPDATEINTERVAL) and not self._commandinprogress:
+          self._lastpartitionupdate = now
+          dscCode = ''
+          if flags.alarm or flags.alarm_fire_zone or flags.fire:
+            dscCode = 'IN_ALARM'
+          elif flags.system_trouble:
+            dscCode = 'NOT_READY'
+          elif flags.ready:
+            dscCode = 'READY'
+          elif flags.bypass:
+            dscCode = 'READY_BYPASS'
+          elif flags.armed_stay:
+            dscCode = 'ARMED_STAY'
+          elif flags.armed_away:
+            dscCode = 'ARMED_AWAY'
+          elif flags.armed_max:
+            dscCode = 'ARMED_MAX'
+
+          for plugin in self.plugins:
+            plugin.partitionStatus(partitionNumber, dscCode)
+
         #logging.debug(json.dumps(ALARMSTATE))
 
     def handle_zone_state_change(self, data):
@@ -493,12 +520,15 @@ class EnvisalinkClient(LineOnlyReceiver):
     # note that a request to dump zone timers generates both a standard command
     # response (handled elsewhere) as well as this event
     def handle_zone_timer_dump(self, zoneDump):
-        zoneTimers = self.convertZoneDump(zoneDump)
-        for zoneNumber, zoneTimer in enumerate(zoneTimers, start=1):
+        zoneInfoArray = self.convertZoneDump(zoneDump)
+        for zoneNumber, zoneInfo in enumerate(zoneInfoArray, start=1):
             zoneName = self._config.ZONENAMES[zoneNumber]
             if zoneName:
-                ALARMSTATE['zone'][zoneNumber]['lastfault'] = zoneTimer
-                logging.debug("%s (zone %i) %s", zoneName, zoneNumber, zoneTimer)
+                ALARMSTATE['zone'][zoneNumber]['lastfault'] = zoneInfo['message']
+                logging.debug("%s (zone %i) %s", zoneName, zoneNumber, zoneInfo['message'])
+                for plugin in self.plugins:
+                    plugin.zoneStatus(zoneNumber, zoneInfo['status'])
+
 
     # convert a zone dump into something humans can make sense of
     def convertZoneDump(self, theString):
@@ -523,15 +553,19 @@ class EnvisalinkClient(LineOnlyReceiver):
             itemSeconds = itemTicks * 5
 
             itemLastClosed = self.humanTimeAgo(timedelta(seconds=itemSeconds))
+	    status = ''
 
             if itemHexString == "FFFF":
                 itemLastClosed = "Currently Open"
-            if itemHexString == "0000":
+            	status = 'open'
+	    if itemHexString == "0000":
                 itemLastClosed = "Last Closed longer ago than I can remember"
+		status = 'closed'
             else:
                 itemLastClosed = "Last Closed " + itemLastClosed
+		status = 'closed'
 
-            returnItems.append(str(itemLastClosed))
+            returnItems.append({'message' : str(itemLastClosed), 'status' : status})
         return returnItems
 
     # public domain from https://pypi.python.org/pypi/ago/0.0.6
@@ -589,7 +623,7 @@ class AlarmServer(Resource):
         root.putChild('img', File(rootFilePath))
         root.putChild('api', self)
         factory = Site(root)
-        self._port = reactor.listenSSL(config.HTTPSPORT, factory,
+        self._port = reactor.listenssh(config.HTTPSPORT, factory,
                                        ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
 
     def shutdownEvent(self):
@@ -700,3 +734,4 @@ if __name__ == "__main__":
         print "Crtl+C pressed. Shutting down."
         logging.info('Shutting down from Ctrl+C')
         sys.exit()
+
