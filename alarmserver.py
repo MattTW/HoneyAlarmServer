@@ -15,7 +15,7 @@ import logging
 import re
 import urlparse
 
-from twisted.internet import ssl, reactor, tcp
+from twisted.internet import reactor
 from twisted.web.resource import Resource, NoResource
 from twisted.web.server import Site
 from twisted.web.static import File
@@ -36,6 +36,7 @@ MAXZONES = 128
 MAXALARMUSERS = 47
 shuttingdown = False
 
+
 class AlarmServerConfig(BaseConfig):
     def __init__(self, configfile):
         # call ancestor for common setup
@@ -44,9 +45,12 @@ class AlarmServerConfig(BaseConfig):
         self.LOGURLREQUESTS = self.read_config_var('alarmserver',
                                                    'logurlrequests',
                                                    True, 'bool')
-        self.HTTPSPORT = self.read_config_var('alarmserver',
-                                              'httpsport',
-                                              8111, 'int')
+        self.LISTENTYPE = self.read_config_var('alarmserver',
+                                               'listentype',
+                                               'ssl', 'str')
+        self.LISTENPORT = self.read_config_var('alarmserver',
+                                               'listenport',
+                                               8111, 'int')
         self.CERTFILE = self.read_config_var('alarmserver',
                                              'certfile',
                                              'server.crt', 'str')
@@ -384,27 +388,27 @@ class EnvisalinkClient(LineOnlyReceiver):
             ALARMSTATE['partition'][partitionNumber]['status'].update({'armed': armed})
 
         now = datetime.now()
-        delta = now - self._lastpartitionupdate 
+        delta = now - self._lastpartitionupdate
         if delta > timedelta(seconds=self._config.ENVISAKEYPADUPDATEINTERVAL) and not self._commandinprogress:
-          self._lastpartitionupdate = now
-          dscCode = ''
-          if flags.alarm or flags.alarm_fire_zone or flags.fire:
-            dscCode = 'IN_ALARM'
-          elif flags.system_trouble:
-            dscCode = 'NOT_READY'
-          elif flags.ready:
-            dscCode = 'READY'
-          elif flags.bypass:
-            dscCode = 'READY_BYPASS'
-          elif flags.armed_stay:
-            dscCode = 'ARMED_STAY'
-          elif flags.armed_away:
-            dscCode = 'ARMED_AWAY'
-          elif flags.armed_max:
-            dscCode = 'ARMED_MAX'
+            self._lastpartitionupdate = now
+            dscCode = ''
+            if flags.alarm or flags.alarm_fire_zone or flags.fire:
+                dscCode = 'IN_ALARM'
+            elif flags.system_trouble:
+                dscCode = 'NOT_READY'
+            elif flags.ready:
+                dscCode = 'READY'
+            elif flags.bypass:
+                dscCode = 'READY_BYPASS'
+            elif flags.armed_stay:
+                dscCode = 'ARMED_STAY'
+            elif flags.armed_away:
+                dscCode = 'ARMED_AWAY'
+            elif flags.armed_max:
+                dscCode = 'ARMED_MAX'
 
-          for plugin in self.plugins:
-            plugin.partitionStatus(partitionNumber, dscCode)
+            for plugin in self.plugins:
+                plugin.partitionStatus(partitionNumber, dscCode)
 
         #logging.debug(json.dumps(ALARMSTATE))
 
@@ -553,20 +557,20 @@ class EnvisalinkClient(LineOnlyReceiver):
             itemSeconds = itemTicks * 5
 
             itemLastClosed = self.humanTimeAgo(timedelta(seconds=itemSeconds))
-	    status = ''
+            status = ''
 
             if itemHexString == "FFFF":
                 itemLastClosed = "Currently Open"
-            	status = 'open'
-	    if itemHexString == "0000":
+                status = 'open'
+            if itemHexString == "0000":
                 itemLastClosed = "Last Closed longer ago than I can remember"
-		status = 'closed'
+                status = 'closed'
             else:
                 itemLastClosed = "Last Closed " + itemLastClosed
-		status = 'closed'
+                status = 'closed'
 
-            returnItems.append({'message' : str(itemLastClosed), 'status' : status})
-        return returnItems
+            returnItems.append({'message': str(itemLastClosed), 'status': status})
+            return returnItems
 
     # public domain from https://pypi.python.org/pypi/ago/0.0.6
     def delta2dict(self, delta):
@@ -623,8 +627,15 @@ class AlarmServer(Resource):
         root.putChild('img', File(rootFilePath))
         root.putChild('api', self)
         factory = Site(root)
-        self._port = reactor.listenssh(config.HTTPSPORT, factory,
-                                       ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
+        # conditionally import twisted ssl to help avoid unwanted depdencies and import issues on some systems
+        if config.LISTENTYPE.lower() == "tcp":
+            self._port = reactor.listenTCP(config.LISTENPORT, factory)
+        elif config.LISTENTYPE.lower() == "ssl":
+            from twisted.internet import ssl
+            self._port = reactor.listenSSL(config.LISTENPORT, factory,
+                                           ssl.DefaultOpenSSLContextFactory(config.KEYFILE, config.CERTFILE))
+        else:
+            logging.warning("AlarmServer listen type %s unknown, server not started.", config.LISTENTYPE)
 
     def shutdownEvent(self):
         global shuttingdown
@@ -734,4 +745,3 @@ if __name__ == "__main__":
         print "Crtl+C pressed. Shutting down."
         logging.info('Shutting down from Ctrl+C')
         sys.exit()
-
