@@ -72,6 +72,8 @@ class SmartthingsPlugin(BasePlugin):
         if partition == '' or status == '':
           logging.debug("Partition or status was empty, skipping this event. NOTE: This may be an error, if so we need to get a proper status for whatever even this is to fix it")
           return
+        else:
+          logging.debug("Status code was: %s", status)
 
         # Better error handling..
         try:
