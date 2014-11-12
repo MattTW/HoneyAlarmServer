@@ -67,15 +67,30 @@ class SmartthingsPlugin(BasePlugin):
         # Map HoneyAlarm states to DSC codes
         # NOTE: EXIT_ENTRY_DELAY is both exit and entry, currently maped to exit delay on DSC codes
         # how to fix that?
-        dscCodes = { 'READY': 650,
-            'NOT_READY': 651,
-            'IN_ALARM': 654,
-            'EXIT_ENTRY_DELAY': 656,
-            'ARMED_STAY': 652,
-            'ARMED_AWAY': 652,
-            'ARMED_MAX': 652,
-            'READY_BYPASS': 702
-            }
+
+        # Better error checking..
+        if partition == '' or status == '':
+          logging.debug("Partition or status was empty, skipping this event. NOTE: This may be an error, if so we need to get a proper status for whatever even this is to fix it")
+          return
+        else:
+          logging.debug("Status code was: %s", status)
+
+        # Better error handling..
+        try:
+          dscCodes = { 'READY': 650,
+              'NOT_READY': 651,
+              'IN_ALARM': 654,
+              'EXIT_ENTRY_DELAY': 656,
+              'ARMED_STAY': 652,
+              'ARMED_AWAY': 652,
+              'ARMED_MAX': 652,
+              'READY_BYPASS': 702
+              }
+        except:
+          logging.debug("Status code we received was not in the map, please add it and map to a proper number if you want to act on it")
+          return
+
+        # If we made it here we should be OK to lookup and send our notification to Smartthings
         code = dscCodes[status]
         self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/" + str(code) + "/" + str(partition) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
         logging.debug("URL: %s" % self._urlbase)
