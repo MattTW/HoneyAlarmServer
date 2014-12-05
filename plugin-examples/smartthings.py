@@ -84,7 +84,8 @@ class SmartthingsPlugin(BasePlugin):
 
         # Better error handling..
         try:
-          dscCodes = { 'READY': 650,
+          dscCodes = {
+              'READY': 650,
               'NOT_READY': 651,
               'IN_ALARM': 654,
               'EXIT_ENTRY_DELAY': 656,
