@@ -99,7 +99,7 @@ class SmartthingsPlugin(BasePlugin):
 
         # If system sent us the READY_BYPASS signal then all zones are closed so dump our list to close them all
         # this is mainly due to issues with the Ademco/Vista panels and the Envizalink TPI not always reporting close events.
-        if status == 'READY_BYPASS':
+        if status == 'READY_BYPASS' or status == 'READY':
           for zone in self._openzones:
             # Send close code 610 for each zone in the list
             self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/610/" + str(int(zone)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
