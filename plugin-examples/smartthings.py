@@ -13,9 +13,10 @@ class SmartthingsPlugin(BasePlugin):
         self._CALLBACKURL_EVENT_CODES  = self.read_config_var('smartthings', 'callbackurl_event_codes', 'not_provided', 'str')
 
         #  URL example: ${callbackurl_base}/${callbackurl_app_id}/panel/${code}/${zoneorpartitionnumber}?access_token=${callbackurl_access_token}
-
         self._payload = {}
         self._urlbase = ""
+        # Tracking list for open zones
+        self._openzones = []
 
     def armedAway(self, user):
         self._payload['message'] = "Security system armed away by " + user
@@ -54,8 +55,14 @@ class SmartthingsPlugin(BasePlugin):
     def zoneStatus(self, zone, status):
         # Goofy for now but map open/closed to DSC event numbers 609 and 610 so we don't have to modify the Smartthings app for DSC
         if status == 'open':
+          # Track open zones, only append if it's not already in our list
+          if zone not in self._openzones:
+            self._openzones.append(zone)
           code = 609
         else:
+          # Track closed zones, remove from our list if it was there
+          if zone in self._openzones:
+            self._openzones.remove(zone)
           code = 610
 
         # Make the proper URL now
@@ -89,6 +96,18 @@ class SmartthingsPlugin(BasePlugin):
         except:
           logging.debug("Status code we received was not in the map, please add it and map to a proper number if you want to act on it")
           return
+
+        # If system sent us the READY_BYPASS signal then all zones are closed so dump our list to close them all
+        # this is mainly due to issues with the Ademco/Vista panels and the Envizalink TPI not always reporting close events.
+        if status == 'READY_BYPASS':
+          for zone in self._openzones:
+            # Send close code 610 for each zone in the list
+            self._urlbase = self._CALLBACKURL_BASE + "/" + self._CALLBACKURL_APP_ID + "/panel/610/" + str(int(zone)) + "?access_token=" + self._CALLBACKURL_ACCESS_TOKEN
+            logging.debug("URL: %s" % self._urlbase)
+            self.postAndCheckresponse()
+
+          # Delete everything in the list now so we don't close them again unless they open again
+          del self._openzones[:]
 
         # If we made it here we should be OK to lookup and send our notification to Smartthings
         code = dscCodes[status]
