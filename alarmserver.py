@@ -570,7 +570,7 @@ class EnvisalinkClient(LineOnlyReceiver):
                 status = 'closed'
 
             returnItems.append({'message': str(itemLastClosed), 'status': status})
-            return returnItems
+        return returnItems
 
     # public domain from https://pypi.python.org/pypi/ago/0.0.6
     def delta2dict(self, delta):
