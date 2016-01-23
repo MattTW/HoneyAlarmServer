@@ -63,6 +63,9 @@ class AlarmServerConfig(BaseConfig):
         self.MAXALLEVENTS = self.read_config_var('alarmserver',
                                                  'maxallevents',
                                                  100, 'int')
+        self.ENVISALINKVERSION = self.read_config_var('envisalink',
+                                                      'version',
+                                                      3, int)
         self.ENVISALINKHOST = self.read_config_var('envisalink',
                                                    'host',
                                                    'envisalink', 'str')
@@ -432,10 +435,14 @@ class EnvisalinkClient(LineOnlyReceiver):
         bitfieldString = str(bin(int(bigEndianHexString, 16))[2:].zfill(64))
 
         # reverse every 16 bits so "lowest" zone is on the left
+        # only needed for envisalink 3.  EVL4 seems to have it already reversed
         zonefieldString = ''
-        inputItems = re.findall('.' * 16, bitfieldString)
-        for inputItem in inputItems:
-            zonefieldString += inputItem[::-1]
+        if self.ENVISALINKVERSION == 3:
+            inputItems = re.findall('.' * 16, bitfieldString)
+            for inputItem in inputItems:
+                zonefieldString += inputItem[::-1]
+        else:
+            zonefieldString = bitfieldString
 
         for zoneNumber, zoneBit in enumerate(zonefieldString, start=1):
             zoneName = self._config.ZONENAMES[zoneNumber]
