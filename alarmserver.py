@@ -437,7 +437,7 @@ class EnvisalinkClient(LineOnlyReceiver):
         # reverse every 16 bits so "lowest" zone is on the left
         # only needed for envisalink 3.  EVL4 seems to have it already reversed
         zonefieldString = ''
-        if self.ENVISALINKVERSION == 3:
+        if self._config.ENVISALINKVERSION == 3:
             inputItems = re.findall('.' * 16, bitfieldString)
             for inputItem in inputItems:
                 zonefieldString += inputItem[::-1]
