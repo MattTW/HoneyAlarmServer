@@ -63,6 +63,9 @@ class AlarmServerConfig(BaseConfig):
         self.MAXALLEVENTS = self.read_config_var('alarmserver',
                                                  'maxallevents',
                                                  100, 'int')
+        self.ENVISALINKVERSION = self.read_config_var('envisalink',
+                                                      'version',
+                                                      3, int)
         self.ENVISALINKHOST = self.read_config_var('envisalink',
                                                    'host',
                                                    'envisalink', 'str')
@@ -412,24 +415,24 @@ class EnvisalinkClient(LineOnlyReceiver):
 
         #logging.debug(json.dumps(ALARMSTATE))
 
-    def handle_zone_state_change(self, data):
-        # Envisalink TPI is inconsistent at generating these
+    def zoneHexString2Bitmask(self, aHexStringInt):
+        bitfieldString = ''
         bigEndianHexString = ''
         # every four characters
-        inputItems = re.findall('....', data)
+        inputItems = re.findall('....', aHexStringInt)
         for inputItem in inputItems:
             # Swap the couples of every four bytes
             # (little endian to big endian)
-            swapedBytes = []
-            swapedBytes.insert(0, inputItem[0:2])
-            swapedBytes.insert(0, inputItem[2:4])
+            swappedBytes = []
+            swappedBytes.insert(0, inputItem[0:2])
+            swappedBytes.insert(0, inputItem[2:4])
 
             # add swapped set of four bytes to our return items,
             # converting from hex to int
-            bigEndianHexString += ''.join(swapedBytes)
+            bigEndianHexString += ''.join(swappedBytes)
 
-        # convert hex string to 64 bit bitstring
-        bitfieldString = str(bin(int(bigEndianHexString, 16))[2:].zfill(64))
+            # convert hex string to 64 bit bitstring
+            bitfieldString = str(bin(int(bigEndianHexString, 16))[2:].zfill(64))
 
         # reverse every 16 bits so "lowest" zone is on the left
         zonefieldString = ''
@@ -437,7 +440,20 @@ class EnvisalinkClient(LineOnlyReceiver):
         for inputItem in inputItems:
             zonefieldString += inputItem[::-1]
 
-        for zoneNumber, zoneBit in enumerate(zonefieldString, start=1):
+        return zonefieldString
+
+    def handle_zone_state_change(self, data):
+        # Envisalink TPI is inconsistent at generating these
+        fullZoneBitmask = ''
+        if self._config.ENVISALINKVERSION == 4:
+            #envisalink 4 returns 128 bits for zone bitmask, bin function used
+            #conversion logic assumes 64 bit int so break it in two and combine the parts.
+            fullZoneBitmask = zoneHexString2Bitmask(data[0:16])
+            fullZoneBitmask += zoneHexString2Bitmask(data[16:])
+        else:
+            fullZoneBitmask = self.zoneHexString2Bitmask(data)
+
+        for zoneNumber, zoneBit in enumerate(fullZoneBitmask, start=1):
             zoneName = self._config.ZONENAMES[zoneNumber]
             if zoneName:    # defined in config with name (i.e. we care about it?)
                 ALARMSTATE['zone'][zoneNumber]['status'].update({'open': zoneBit == '1', 'fault': zoneBit == '1'})
