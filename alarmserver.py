@@ -65,7 +65,7 @@ class AlarmServerConfig(BaseConfig):
                                                  100, 'int')
         self.ENVISALINKVERSION = self.read_config_var('envisalink',
                                                       'version',
-                                                      3, int)
+                                                      3, 'int')
         self.ENVISALINKHOST = self.read_config_var('envisalink',
                                                    'host',
                                                    'envisalink', 'str')
@@ -448,8 +448,8 @@ class EnvisalinkClient(LineOnlyReceiver):
         if self._config.ENVISALINKVERSION == 4:
             #envisalink 4 returns 128 bits for zone bitmask, bin function used
             #conversion logic assumes 64 bit int so break it in two and combine the parts.
-            fullZoneBitmask = zoneHexString2Bitmask(data[0:16])
-            fullZoneBitmask += zoneHexString2Bitmask(data[16:])
+            fullZoneBitmask = self.zoneHexString2Bitmask(data[0:16])
+            fullZoneBitmask += self.zoneHexString2Bitmask(data[16:])
         else:
             fullZoneBitmask = self.zoneHexString2Bitmask(data)
 
