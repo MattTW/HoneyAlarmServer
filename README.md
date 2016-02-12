@@ -36,10 +36,15 @@ See the plugin-examples directory for a few samples:
 
 *sssPlugin* - Communicates with Synology Survelliance Station
 
+*pushbullet* - Sends notifications to the PushBullet API (see dependancies)
+
 Config
 -------
 Please see the alarmserver-example.cfg and rename to alarmserver.cfg and
 customize to requirements.
+
+The config requirements for pushbullet are located inside the python script itself 	(plugin-examples\pushbullet.py)
+
 
 There are example plugins in the plugin-examples directory.  Copy/modify and place them in the plugins directory along with a valid cfg file to use them
 
@@ -65,6 +70,10 @@ Dependencies:
 
 On windows, pyOpenSSL is required.
 http://pypi.python.org/pypi/pyOpenSSL
+
+To use the pushbullet Plugin you need to install the Pushbullet library
+https://github.com/randomchars/pushbullet.py
+Use the easy install (pip install pushbullet.py)
 
 
 Launchers

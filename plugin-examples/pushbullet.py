@@ -5,9 +5,13 @@ import pushbullet
 from basePlugin import BasePlugin
 from pushbullet import Listener
 from pushbullet import Pushbullet
+
+#Fill out the following from here
 API_KEY = 'APIKEY'
 HTTP_PROXY_HOST = None
 HTTP_PROXY_PORT = None
+#to here
+
 pb = Pushbullet(API_KEY)
 note = 0
 title = 0
