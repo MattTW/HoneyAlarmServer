@@ -82,18 +82,21 @@ class SmartthingsPlugin(BasePlugin):
         else:
           logging.debug("Status code was: %s", status)
 
+        dscCodes = {
+            'READY': 650,
+            'NOT_READY': 651,
+            'ALARM_IN_MEMORY': 654,
+            'IN_ALARM': 654,
+            'EXIT_ENTRY_DELAY': 656,
+            'ARMED_STAY': 652,
+            'ARMED_AWAY': 652,
+            'ARMED_MAX': 652,
+            'READY_BYPASS': 702
+            }
+
         # Better error handling..
         try:
-          dscCodes = {
-              'READY': 650,
-              'NOT_READY': 651,
-              'IN_ALARM': 654,
-              'EXIT_ENTRY_DELAY': 656,
-              'ARMED_STAY': 652,
-              'ARMED_AWAY': 652,
-              'ARMED_MAX': 652,
-              'READY_BYPASS': 702
-              }
+          dscCodes[status]
         except:
           logging.debug("Status code we received was not in the map, please add it and map to a proper number if you want to act on it")
           return
