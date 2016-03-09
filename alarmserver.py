@@ -690,10 +690,10 @@ class AlarmServer(Resource):
             return json.dumps({'response': 'Arm Home command sent to Envisalink.'})
         elif myPath == '/api/alarm/chime':
             e.send_data(alarmcode + '9')
-            return json.dumps({'response': 'Chime Home command sent to Envisalink.'})
+            return json.dumps({'response': 'Chime command sent to Envisalink.'})
         elif myPath == '/api/alarm/panic':
             e.send_data('*' + '#')
-            return json.dumps({'response': 'Panic Home command sent to Envisalink.'})                        
+            return json.dumps({'response': 'Panic command sent to Envisalink.'})                        
         elif myPath == '/api/alarm/disarm':
             e.send_data(alarmcode + '1')
             #e.keypresses_to_partition(1, alarmcode + '1')
