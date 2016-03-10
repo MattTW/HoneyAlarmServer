@@ -692,7 +692,7 @@ class AlarmServer(Resource):
             e.send_data(alarmcode + '9')
             return json.dumps({'response': 'Chime command sent to Envisalink.'})
         elif myPath == '/api/alarm/panic':
-            e.send_data('*' + '#')
+            e.send_data('B')
             return json.dumps({'response': 'Panic command sent to Envisalink.'})                        
         elif myPath == '/api/alarm/disarm':
             e.send_data(alarmcode + '1')
