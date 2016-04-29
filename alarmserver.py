@@ -308,7 +308,7 @@ class EnvisalinkClient(LineOnlyReceiver):
             if input[0] in ("%", "^"):
                 # keep first sentinel char to tell difference between tpi and
                 # Envisalink command responses.  Drop the trailing $ sentinel.
-                inputList = input[0:-1].split(',')
+                inputList = input[0:-1].split(',', 5)
                 code = inputList[0]
                 data = ','.join(inputList[1:])
             else:
